@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
   Flame,
-  Trash2,
+  Trash2, 
   RotateCcw,
   Check,
   X,
