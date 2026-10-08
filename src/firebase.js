@@ -1,6 +1,14 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  getAuth,
+  GoogleAuthProvider,
+} from "firebase/auth";
+
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 
 const firebaseConfig = {
  apiKey: "AIzaSyAIA7lZrwCWdy6DRZBmny2kFGfGT2DD07U",
@@ -14,6 +22,44 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
+/*
+ * =========================================================
+ * FIREBASE AUTH
+ * =========================================================
+ */
+
 export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
-export const db = getFirestore(app);
+
+export const googleProvider =
+  new GoogleAuthProvider();
+
+/*
+ * =========================================================
+ * FIRESTORE OFFLINE-FIRST CONFIGURATION
+ * =========================================================
+ *
+ * Firestore keeps a persistent local cache in IndexedDB.
+ *
+ * This means:
+ *
+ * ONLINE
+ *   Local write → Firestore
+ *
+ * OFFLINE
+ *   Local write → IndexedDB
+ *
+ * WHEN CONNECTION RETURNS
+ *   IndexedDB → Firestore automatically
+ *
+ * Multiple browser tabs can safely share
+ * the same Firestore cache.
+ */
+
+export const db =
+  initializeFirestore(app, {
+    localCache:
+      persistentLocalCache({
+        tabManager:
+          persistentMultipleTabManager(),
+      }),
+  });
