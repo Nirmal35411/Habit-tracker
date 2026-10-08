@@ -1,3 +1,4 @@
+```jsx
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
@@ -30,9 +31,15 @@ import {
   writeBatch,
 } from "firebase/firestore";
 
-import { auth, googleProvider, db } from "./firebase";
+import {
+  auth,
+  googleProvider,
+  db,
+} from "./firebase";
 
-const today = new Date().toISOString().slice(0, 10);
+const today = new Date()
+  .toISOString()
+  .slice(0, 10);
 
 const initialHabits = [
   {
@@ -70,7 +77,9 @@ async function migrateLegacyRecords(
   habitId,
   records
 ) {
-  const entries = Object.entries(records || {});
+  const entries = Object.entries(
+    records || {}
+  );
 
   if (entries.length === 0) {
     return;
@@ -85,8 +94,6 @@ async function migrateLegacyRecords(
     "records"
   );
 
-  // Firestore batches have a limit.
-  // 400 leaves room below the 500-operation limit.
   const chunkSize = 400;
 
   for (
@@ -115,8 +122,6 @@ async function migrateLegacyRecords(
     await batch.commit();
   }
 
-  // Remove the old embedded records only
-  // after all records were successfully copied.
   await setDoc(
     doc(
       db,
@@ -138,24 +143,29 @@ async function loadHabitRecords(
   userId,
   habitId
 ) {
-  const recordsSnapshot = await getDocs(
-    collection(
-      db,
-      "users",
-      userId,
-      "habits",
-      habitId,
-      "records"
-    )
-  );
+  const recordsSnapshot =
+    await getDocs(
+      collection(
+        db,
+        "users",
+        userId,
+        "habits",
+        habitId,
+        "records"
+      )
+    );
 
   const records = {};
 
-  recordsSnapshot.forEach((recordDoc) => {
-    const data = recordDoc.data();
+  recordsSnapshot.forEach(
+    (recordDoc) => {
+      const data =
+        recordDoc.data();
 
-    records[recordDoc.id] = data.value;
-  });
+      records[recordDoc.id] =
+        data.value;
+    }
+  );
 
   return records;
 }
@@ -164,10 +174,16 @@ async function loadHabitRecords(
    HABIT HELPERS
    ========================================================= */
 
-function intensity(value, reference) {
-  if (!value || !reference) return 0;
+function intensity(
+  value,
+  reference
+) {
+  if (!value || !reference) {
+    return 0;
+  }
 
-  const ratio = value / reference;
+  const ratio =
+    value / reference;
 
   if (ratio >= 1) return 4;
   if (ratio >= 0.75) return 3;
@@ -182,8 +198,13 @@ function getStreak(habit) {
   let streak = 0;
 
   while (true) {
-    const key = date.toISOString().slice(0, 10);
-    const value = habit.records?.[key];
+    const key =
+      date
+        .toISOString()
+        .slice(0, 10);
+
+    const value =
+      habit.records?.[key];
 
     const successful =
       habit.type === "boolean"
@@ -191,7 +212,9 @@ function getStreak(habit) {
         : Number(value || 0) >=
           habit.referenceAmount;
 
-    if (!successful) break;
+    if (!successful) {
+      break;
+    }
 
     streak++;
 
@@ -230,14 +253,19 @@ function Calendar({ habit }) {
       <div className="calendar">
         {days.map((date) => {
           const key =
-            date.toISOString().slice(0, 10);
+            date
+              .toISOString()
+              .slice(0, 10);
 
           const value =
             habit.records?.[key];
 
           let level = 0;
 
-          if (habit.type === "boolean") {
+          if (
+            habit.type ===
+            "boolean"
+          ) {
             level = value ? 4 : 0;
           } else {
             level = intensity(
@@ -251,7 +279,8 @@ function Calendar({ habit }) {
               key={key}
               className={`day level-${level}`}
               title={`${key}: ${
-                habit.type === "boolean"
+                habit.type ===
+                "boolean"
                   ? value
                     ? "Done"
                     : "Not done"
@@ -278,7 +307,8 @@ function HabitCard({
   const todayValue =
     habit.records?.[today];
 
-  const streak = getStreak(habit);
+  const streak =
+    getStreak(habit);
 
   return (
     <div className="habit-card">
@@ -290,16 +320,23 @@ function HabitCard({
           />
 
           <div>
-            <h2>{habit.name}</h2>
+            <h2>
+              {habit.name}
+            </h2>
 
-            {habit.type === "numeric" ? (
+            {habit.type ===
+            "numeric" ? (
               <p>
                 Reference:{" "}
-                {habit.referenceAmount}{" "}
+                {
+                  habit.referenceAmount
+                }{" "}
                 {habit.unit}
               </p>
             ) : (
-              <p>Yes / No habit</p>
+              <p>
+                Yes / No habit
+              </p>
             )}
           </div>
         </div>
@@ -311,7 +348,9 @@ function HabitCard({
             }
             title="Edit"
           >
-            <Settings size={17} />
+            <Settings
+              size={17}
+            />
           </button>
 
           <button
@@ -346,10 +385,13 @@ function HabitCard({
             onToggleToday(habit)
           }
         >
-          {habit.type === "boolean" ? (
+          {habit.type ===
+          "boolean" ? (
             todayValue ? (
               <>
-                <Check size={17} />
+                <Check
+                  size={17}
+                />
                 Done
               </>
             ) : (
@@ -375,18 +417,25 @@ function HabitCard({
    LOGIN SCREEN
    ========================================================= */
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({
+  onLogin,
+}) {
   return (
     <div className="login-screen">
       <div className="login-card">
         <div className="login-icon">
-          <CalendarDays size={32} />
+          <CalendarDays
+            size={32}
+          />
         </div>
 
-        <h1>Habit Tracker</h1>
+        <h1>
+          Habit Tracker
+        </h1>
 
         <p>
-          Track your habits, build consistency,
+          Track your habits,
+          build consistency,
           and see your progress.
         </p>
 
@@ -406,17 +455,27 @@ function LoginScreen({ onLogin }) {
    ========================================================= */
 
 function App() {
+  /*
+   * undefined means Firebase is still determining
+   * whether the user is logged in.
+   *
+   * null means the user is definitely logged out.
+   */
   const [user, setUser] =
     useState(undefined);
 
   const [isOnline, setIsOnline] =
-    useState(navigator.onLine);
+    useState(
+      navigator.onLine
+    );
 
   const [habits, setHabits] =
     useState([]);
 
-  const [loadingHabits, setLoadingHabits] =
-    useState(false);
+  const [
+    loadingHabits,
+    setLoadingHabits,
+  ] = useState(false);
 
   const [view, setView] =
     useState("habits");
@@ -424,57 +483,93 @@ function App() {
   const [showAdd, setShowAdd] =
     useState(false);
 
-  const [editingHabit, setEditingHabit] =
-    useState(null);
+  const [
+    editingHabit,
+    setEditingHabit,
+  ] = useState(null);
 
-  /* -------------------------------------------------------
+  /* =======================================================
      AUTH STATE
-     ------------------------------------------------------- */
+     ======================================================= */
 
- /* -------------------------------------------------------
-   ONLINE / OFFLINE STATUS
-   ------------------------------------------------------- */
+  useEffect(() => {
+    console.log(
+      "AUTH: listener starting"
+    );
 
-useEffect(() => {
-  function handleOnline() {
-    setIsOnline(true);
-  }
+    const unsubscribe =
+      onAuthStateChanged(
+        auth,
+        (currentUser) => {
+          console.log(
+            "AUTH: state received",
+            currentUser
+          );
 
-  function handleOffline() {
-    setIsOnline(false);
-  }
+          setUser(currentUser);
+        },
+        (error) => {
+          console.error(
+            "AUTH: listener error",
+            error
+          );
 
-  window.addEventListener(
-    "online",
-    handleOnline
-  );
+          /*
+           * If authentication initialization fails,
+           * don't leave the app stuck on Loading forever.
+           */
+          setUser(null);
+        }
+      );
 
-  window.addEventListener(
-    "offline",
-    handleOffline
-  );
+    return unsubscribe;
+  }, []);
 
-  return () => {
-    window.removeEventListener(
+  /* =======================================================
+     ONLINE / OFFLINE STATUS
+     ======================================================= */
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true);
+    }
+
+    function handleOffline() {
+      setIsOnline(false);
+    }
+
+    window.addEventListener(
       "online",
       handleOnline
     );
 
-    window.removeEventListener(
+    window.addEventListener(
       "offline",
       handleOffline
     );
-  };
-}, []);
 
-  /* -------------------------------------------------------
+    return () => {
+      window.removeEventListener(
+        "online",
+        handleOnline
+      );
+
+      window.removeEventListener(
+        "offline",
+        handleOffline
+      );
+    };
+  }, []);
+
+  /* =======================================================
      LOAD HABITS + MIGRATE OLD RECORDS
-     ------------------------------------------------------- */
+     ======================================================= */
 
   useEffect(() => {
     async function loadHabits() {
       if (!user) {
         setHabits([]);
+        setLoadingHabits(false);
         return;
       }
 
@@ -490,11 +585,13 @@ useEffect(() => {
           );
 
         const snapshot =
-          await getDocs(habitsRef);
+          await getDocs(
+            habitsRef
+          );
 
-        /* -------------------------------------------------
+        /* =================================================
            NEW USER
-           ------------------------------------------------- */
+           ================================================= */
 
         if (snapshot.empty) {
           const seededHabits =
@@ -507,7 +604,8 @@ useEffect(() => {
 
           for (
             let i = 0;
-            i < initialHabits.length;
+            i <
+            initialHabits.length;
             i++
           ) {
             const habit =
@@ -527,14 +625,11 @@ useEffect(() => {
               ...habitData
             } = habit;
 
-            // Store habit metadata.
             await setDoc(
               habitRef,
               habitData
             );
 
-            // Store daily records
-            // separately.
             await migrateLegacyRecords(
               user.uid,
               habit.id,
@@ -556,21 +651,22 @@ useEffect(() => {
           return;
         }
 
-        /* -------------------------------------------------
+        /* =================================================
            EXISTING USER
-           ------------------------------------------------- */
+           ================================================= */
 
         const loadedHabits = [];
 
         for (
-          const item of snapshot.docs
+          const item of
+          snapshot.docs
         ) {
           const data =
             item.data();
 
           /*
-           * If the old records object exists,
-           * migrate it to the subcollection.
+           * Migrate old embedded records
+           * if they still exist.
            */
           if (
             data.records &&
@@ -585,8 +681,8 @@ useEffect(() => {
           }
 
           /*
-           * Always read daily records
-           * from the new subcollection.
+           * Load records from the
+           * records subcollection.
            */
           const records =
             await loadHabitRecords(
@@ -621,9 +717,9 @@ useEffect(() => {
     loadHabits();
   }, [user]);
 
-  /* -------------------------------------------------------
+  /* =======================================================
      GOOGLE LOGIN
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function handleGoogleLogin() {
     try {
@@ -643,9 +739,9 @@ useEffect(() => {
     }
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      LOGOUT
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function handleLogout() {
     try {
@@ -662,9 +758,9 @@ useEffect(() => {
     }
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      SAVE HABIT METADATA
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function saveHabit(habit) {
     if (!user) return;
@@ -724,9 +820,9 @@ useEffect(() => {
     }
   }
 
-  /* -------------------------------------------------------
-     TOGGLE / SAVE TODAY'S RECORD
-     ------------------------------------------------------- */
+  /* =======================================================
+     SAVE TODAY'S RECORD
+     ======================================================= */
 
   async function toggleToday(habit) {
     if (!user) return;
@@ -782,10 +878,11 @@ useEffect(() => {
           numericAmount;
       }
 
-      /* -----------------------------------------------
-         WRITE INDIVIDUAL RECORD DOCUMENT
-         ----------------------------------------------- */
-
+      /*
+       * Firestore offline persistence
+       * automatically queues this write
+       * when the device is offline.
+       */
       await setDoc(
         doc(
           db,
@@ -801,10 +898,9 @@ useEffect(() => {
         }
       );
 
-      /* -----------------------------------------------
-         UPDATE UI IMMEDIATELY
-         ----------------------------------------------- */
-
+      /*
+       * Update UI immediately.
+       */
       setHabits(
         (current) =>
           current.map(
@@ -839,9 +935,9 @@ useEffect(() => {
     }
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      MOVE TO BIN
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function moveToBin(id) {
     if (
@@ -868,9 +964,9 @@ useEffect(() => {
     });
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      RESTORE
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function restore(id) {
     const habit =
@@ -888,9 +984,9 @@ useEffect(() => {
     });
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      PERMANENT DELETE
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function permanentlyDelete(
     id
@@ -904,9 +1000,6 @@ useEffect(() => {
     }
 
     try {
-      /*
-       * Delete all record documents first.
-       */
       const recordsSnapshot =
         await getDocs(
           collection(
@@ -932,9 +1025,6 @@ useEffect(() => {
 
       await batch.commit();
 
-      /*
-       * Then delete the habit itself.
-       */
       await deleteDoc(
         doc(
           db,
@@ -959,14 +1049,14 @@ useEffect(() => {
       );
 
       alert(
-        `Failed to delete habit: ${error.message}`
+        `Failed to permanently delete habit: ${error.message}`
       );
     }
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      ADD HABIT
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function addHabit(data) {
     const newHabit = {
@@ -984,9 +1074,9 @@ useEffect(() => {
     setShowAdd(false);
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      UPDATE HABIT
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function updateHabit(data) {
     const existing =
@@ -1008,9 +1098,9 @@ useEffect(() => {
     );
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      MOVE HABIT UP / DOWN
-     ------------------------------------------------------- */
+     ======================================================= */
 
   async function moveHabit(
     index,
@@ -1039,9 +1129,6 @@ useEffect(() => {
       sorted[index],
     ];
 
-    /*
-     * Update all affected ordering values.
-     */
     for (
       let i = 0;
       i < sorted.length;
@@ -1058,9 +1145,9 @@ useEffect(() => {
     }
   }
 
-  /* -------------------------------------------------------
-     LOADING
-     ------------------------------------------------------- */
+  /* =======================================================
+     INITIAL LOADING
+     ======================================================= */
 
   if (user === undefined) {
     return (
@@ -1074,9 +1161,9 @@ useEffect(() => {
     );
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      NOT LOGGED IN
-     ------------------------------------------------------- */
+     ======================================================= */
 
   if (!user) {
     return (
@@ -1088,9 +1175,9 @@ useEffect(() => {
     );
   }
 
-  /* -------------------------------------------------------
+  /* =======================================================
      SORT HABITS
-     ------------------------------------------------------- */
+     ======================================================= */
 
   const activeHabits =
     habits
@@ -1109,9 +1196,9 @@ useEffect(() => {
         habit.deleted
     );
 
-  /* -------------------------------------------------------
+  /* =======================================================
      MAIN UI
-     ------------------------------------------------------- */
+     ======================================================= */
 
   return (
     <div className="app">
@@ -1139,21 +1226,23 @@ useEffect(() => {
               user.email}
           </small>
         </div>
-        <div className="sync-status-container">
-  <div
-    className={`sync-status ${
-      isOnline
-        ? "online"
-        : "offline"
-    }`}
-  >
-    <span className="sync-dot" />
 
-    {isOnline
-      ? "Online"
-      : "Offline — changes saved locally"}
-  </div>
-</div>
+        <div className="sync-status-container">
+          <div
+            className={`sync-status ${
+              isOnline
+                ? "online"
+                : "offline"
+            }`}
+          >
+            <span className="sync-dot" />
+
+            {isOnline
+              ? "Online"
+              : "Offline — changes saved locally"}
+          </div>
+        </div>
+
         <div className="topbar-actions">
           <button
             className="add-button"
@@ -1175,7 +1264,9 @@ useEffect(() => {
             }
             title="Sign out"
           >
-            <LogOut size={18} />
+            <LogOut
+              size={18}
+            />
           </button>
         </div>
       </header>
@@ -1230,7 +1321,9 @@ useEffect(() => {
             setView("bin")
           }
         >
-          <Archive size={18} />
+          <Archive
+            size={18}
+          />
 
           Bin
         </button>
@@ -1250,11 +1343,8 @@ useEffect(() => {
           </div>
         ) : (
           <>
-            {/* -----------------------------------------
-                HABITS VIEW
-                ----------------------------------------- */}
-
-            {view === "habits" && (
+            {view ===
+              "habits" && (
               <section>
                 {activeHabits.length ===
                 0 ? (
@@ -1349,10 +1439,6 @@ useEffect(() => {
               </section>
             )}
 
-            {/* -----------------------------------------
-                STATISTICS
-                ----------------------------------------- */}
-
             {view ===
               "statistics" && (
               <section className="panel">
@@ -1412,10 +1498,6 @@ useEffect(() => {
                 )}
               </section>
             )}
-
-            {/* -----------------------------------------
-                BIN
-                ----------------------------------------- */}
 
             {view ===
               "bin" && (
@@ -1500,10 +1582,6 @@ useEffect(() => {
           </>
         )}
       </main>
-
-      {/* ---------------------------------------------
-          ADD / EDIT MODAL
-          --------------------------------------------- */}
 
       {(showAdd ||
         editingHabit) && (
@@ -1682,16 +1760,11 @@ function HabitModal({
 
             {habit && (
               <p className="modal-note">
-                Changing
-                the
-                reference
-                will
-                recalculate
-                the
-                intensity
-                of all
-                historical
-                days.
+                Changing the
+                reference will
+                recalculate the
+                intensity of all
+                historical days.
               </p>
             )}
           </>
@@ -1722,3 +1795,4 @@ function HabitModal({
 }
 
 export default App;
+```
