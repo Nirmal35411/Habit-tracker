@@ -1,4 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   GoogleAuthProvider,
@@ -192,6 +197,411 @@ function formatNumber(value) {
   }
 
   return number.toFixed(2).replace(/\.?0+$/, "");
+}
+
+/* =========================================================
+   DAILY SCORE
+   ---------------------------------------------------------
+   A day score is stored once per day in
+   users/{uid}/dailyScores/{YYYY-MM-DD}.
+
+   It is only ever written for TODAY. Once the date has
+   passed, nothing in the app writes to that day again, so
+   later weight / reference / habit changes cannot alter it.
+========================================================= */
+
+const DAY_SCORES_PATH = (uid) =>
+  collection(db, "users", uid, "dailyScores");
+
+const DAY_SCORE_PATH = (uid, date) =>
+  doc(db, "users", uid, "dailyScores", date);
+
+function habitWeight(habit) {
+  const weight = Number(habit.weight);
+
+  return Number.isFinite(weight) && weight > 0
+    ? weight
+    : 1;
+}
+
+function roundScore(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return 0;
+
+  return Math.round(number * 100) / 100;
+}
+
+function formatScore(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return "0";
+
+  return String(Number(number.toFixed(1)));
+}
+
+function firstRecordKey(habit) {
+  let first = null;
+
+  for (const key of Object.keys(habit.records || {})) {
+    if (first === null || key < first) first = key;
+  }
+
+  return first;
+}
+
+/*
+ * score = sum(weight * completion%) / sum(weight)
+ *
+ * Boolean habits count as 0% or 100%.
+ * Numeric habits use their exact % (capped at 100% so one
+ * over-achieved habit can't hide a missed one).
+ *
+ * `starts` (optional Map habitId -> first record date) is used
+ * only when back-filling old days: a habit counts for a past
+ * day only if it already had history by then.
+ *
+ * Returns a number from 0 to 100, or null if no habit applies.
+ */
+function calculateDayScore(habits, key, starts = null) {
+  let weighted = 0;
+  let totalWeight = 0;
+
+  for (const habit of habits) {
+    if (starts) {
+      const start = starts.get(habit.id);
+
+      if (!start || start > key) continue;
+    }
+
+    const weight = habitWeight(habit);
+
+    const percent = Math.min(
+      100,
+      achievementPercent(habit, habit.records[key])
+    );
+
+    weighted += weight * percent;
+    totalWeight += weight;
+  }
+
+  if (totalWeight <= 0) return null;
+
+  return weighted / totalWeight;
+}
+
+async function loadDayScores(uid, source = "server") {
+  const snapshot =
+    source === "cache"
+      ? await getDocsFromCache(DAY_SCORES_PATH(uid))
+      : await getDocs(DAY_SCORES_PATH(uid));
+
+  const scores = {};
+
+  snapshot.forEach((scoreDoc) => {
+    const value = Number(scoreDoc.data().score);
+
+    if (Number.isFinite(value)) {
+      scores[scoreDoc.id] = value;
+    }
+  });
+
+  return scores;
+}
+
+const WEEKDAY_LABELS = [
+  "Mon",
+  "Tue",
+  "Wed",
+  "Thu",
+  "Fri",
+  "Sat",
+  "Sun",
+];
+
+function scoreCellStyle(score) {
+  const ratio = Math.min(
+    1,
+    Math.max(0, Number(score) / 100)
+  );
+
+  const alpha = 0.1 + ratio * 0.9;
+
+  return {
+    background: `rgba(22, 163, 74, ${alpha.toFixed(3)})`,
+    color: alpha > 0.55 ? "#ffffff" : "#172033",
+  };
+}
+
+function MonthCalendar({
+  year,
+  month,
+  scores,
+  today,
+}) {
+  const label = new Date(year, month, 1).toLocaleDateString(
+    undefined,
+    { month: "long", year: "numeric" }
+  );
+
+  const offset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const cells = [];
+
+  for (let i = 0; i < offset; i += 1) {
+    cells.push({ pad: true, key: `pad-${i}` });
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({
+      pad: false,
+      day,
+      key: dateKey(new Date(year, month, day)),
+    });
+  }
+
+  return (
+    <div className="ds-month">
+      <h3 className="ds-month-title">{label}</h3>
+
+      <div className="ds-weekdays">
+        {WEEKDAY_LABELS.map((name) => (
+          <span key={name}>{name}</span>
+        ))}
+      </div>
+
+      <div className="ds-grid">
+        {cells.map((cell) => {
+          if (cell.pad) {
+            return (
+              <div
+                key={cell.key}
+                className="ds-cell ds-pad"
+              />
+            );
+          }
+
+          const score = scores[cell.key];
+          const hasScore = score !== undefined;
+          const future = cell.key > today;
+
+          return (
+            <div
+              key={cell.key}
+              className={`ds-cell ${
+                hasScore ? "ds-scored" : "ds-empty"
+              } ${future ? "ds-future" : ""} ${
+                cell.key === today ? "ds-today" : ""
+              }`}
+              style={
+                hasScore ? scoreCellStyle(score) : undefined
+              }
+              title={`${formatLongDate(cell.key)} — ${
+                hasScore
+                  ? `${formatScore(score)}%`
+                  : "No score"
+              }`}
+            >
+              <span className="ds-day-num">{cell.day}</span>
+
+              {hasScore && (
+                <span className="ds-day-score">
+                  {Math.round(score)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DayScoreDetails({ scores, today, onBack }) {
+  const [fromInput, setFromInput] = useState("");
+  const [toInput, setToInput] = useState("");
+
+  const scoredKeys = useMemo(
+    () =>
+      Object.keys(scores)
+        .filter((key) => key <= today)
+        .sort(),
+    [scores, today]
+  );
+
+  const firstKey = scoredKeys[0] || today;
+
+  const allTime = useMemo(() => {
+    if (scoredKeys.length === 0) return null;
+
+    const total = scoredKeys.reduce(
+      (sum, key) => sum + scores[key],
+      0
+    );
+
+    return total / scoredKeys.length;
+  }, [scoredKeys, scores]);
+
+  const range = useMemo(() => {
+    const a = fromInput || firstKey;
+    const b = toInput || today;
+
+    const lo = a <= b ? a : b;
+    const hi = a <= b ? b : a;
+
+    const keys = scoredKeys.filter(
+      (key) => key >= lo && key <= hi
+    );
+
+    const total = keys.reduce(
+      (sum, key) => sum + scores[key],
+      0
+    );
+
+    return {
+      count: keys.length,
+      average: keys.length > 0 ? total / keys.length : null,
+    };
+  }, [fromInput, toInput, firstKey, today, scoredKeys, scores]);
+
+  const months = useMemo(() => {
+    const start = parseDateKey(firstKey);
+    const end = parseDateKey(today);
+
+    const list = [];
+
+    let year = end.getFullYear();
+    let month = end.getMonth();
+
+    const startYear = start.getFullYear();
+    const startMonth = start.getMonth();
+
+    while (
+      year > startYear ||
+      (year === startYear && month >= startMonth)
+    ) {
+      list.push({ year, month });
+
+      month -= 1;
+
+      if (month < 0) {
+        month = 11;
+        year -= 1;
+      }
+
+      if (list.length > 1200) break;
+    }
+
+    return list;
+  }, [firstKey, today]);
+
+  return (
+    <div className="details-page">
+      <div className="details-header">
+        <button className="back-button" onClick={onBack}>
+          <ChevronLeft size={20} />
+          Habits
+        </button>
+      </div>
+
+      <div className="details-title">
+        <div>
+          <div className="eyebrow">Day score details</div>
+
+          <h1>Daily scores</h1>
+        </div>
+      </div>
+
+      <div className="ds-top-grid">
+        <div className="ds-card">
+          <div className="ds-card-label">All-time average</div>
+
+          <div className="ds-big">
+            {allTime === null ? "—" : `${formatScore(allTime)}%`}
+          </div>
+
+          <div className="ds-card-sub">
+            {scoredKeys.length} day
+            {scoredKeys.length === 1 ? "" : "s"} scored
+          </div>
+        </div>
+
+        <div className="ds-card">
+          <div className="ds-card-label">Custom average</div>
+
+          <div className="ds-range-row">
+            <label>
+              From
+              <input
+                type="date"
+                value={fromInput || firstKey}
+                min={firstKey}
+                max={today}
+                onChange={(event) =>
+                  setFromInput(event.target.value)
+                }
+              />
+            </label>
+
+            <label>
+              To
+              <input
+                type="date"
+                value={toInput || today}
+                min={firstKey}
+                max={today}
+                onChange={(event) =>
+                  setToInput(event.target.value)
+                }
+              />
+            </label>
+          </div>
+
+          <div className="ds-big">
+            {range.average === null
+              ? "—"
+              : `${formatScore(range.average)}%`}
+          </div>
+
+          <div className="ds-card-sub">
+            {range.count} day{range.count === 1 ? "" : "s"} in
+            range
+          </div>
+        </div>
+      </div>
+
+      <section className="ds-calendar-section">
+        <div className="section-heading">
+          <div>
+            <div className="eyebrow">Calendar</div>
+
+            <h2>Every day, month by month</h2>
+          </div>
+
+          <div className="ds-legend">
+            <span>0%</span>
+            <span className="ds-legend-bar" />
+            <span>100%</span>
+            <span className="ds-legend-none" />
+            <span>No data</span>
+          </div>
+        </div>
+
+        <div className="ds-months">
+          {months.map(({ year, month }) => (
+            <MonthCalendar
+              key={`${year}-${month}`}
+              year={year}
+              month={month}
+              scores={scores}
+              today={today}
+            />
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 /* =========================================================
@@ -1371,6 +1781,10 @@ function HabitModal({
       habit?.referenceAmount ?? 1
     );
 
+  const [weight, setWeight] = useState(
+    habit?.weight ?? 1
+  );
+
   const [saving, setSaving] =
     useState(false);
 
@@ -1396,6 +1810,7 @@ function HabitModal({
               Number(referenceAmount) || 0
             )
           : 1,
+      weight: Math.max(0.01, Number(weight) || 1),
     });
 
     setSaving(false);
@@ -1505,6 +1920,25 @@ function HabitModal({
             </>
           )}
 
+          <label>
+            Weight
+            <input
+              type="number"
+              min="0.01"
+              step="any"
+              value={weight}
+              onChange={(event) =>
+                setWeight(event.target.value)
+              }
+            />
+
+            <span className="input-help">
+              How much this habit counts towards the daily
+              score. Changes apply from today onward; scores
+              of past days never change.
+            </span>
+          </label>
+
           <div className="modal-actions">
             <button
               type="button"
@@ -1574,6 +2008,17 @@ export default function App() {
   const [showMenu, setShowMenu] =
     useState(false);
 
+  const [dayScores, setDayScores] =
+    useState({});
+
+  const [serverReady, setServerReady] =
+    useState(false);
+
+  const [showDayDetails, setShowDayDetails] =
+    useState(false);
+
+  const backfillBusy = useRef(false);
+
   /* -------------------------------------------------------
      AUTH
   ------------------------------------------------------- */
@@ -1587,11 +2032,15 @@ export default function App() {
         if (!currentUser) {
           setHabits([]);
           setDeletedHabits([]);
+          setDayScores({});
+          setServerReady(false);
+          setShowDayDetails(false);
           setLoading(false);
           return;
         }
 
         setLoading(true);
+        setServerReady(false);
         setSyncStatus("loading");
 
         try {
@@ -1629,6 +2078,20 @@ export default function App() {
             );
           }
 
+          try {
+            const localScores = await loadDayScores(
+              currentUser.uid,
+              "cache"
+            );
+
+            setDayScores(localScores);
+          } catch (scoreCacheError) {
+            console.log(
+              "No cached daily scores yet.",
+              scoreCacheError
+            );
+          }
+
           /*
            * Server refresh.
            */
@@ -1652,6 +2115,22 @@ export default function App() {
               );
 
               setSyncStatus("synced");
+
+              try {
+                const serverScores =
+                  await loadDayScores(
+                    currentUser.uid,
+                    "server"
+                  );
+
+                setDayScores(serverScores);
+                setServerReady(true);
+              } catch (scoreError) {
+                console.error(
+                  "Could not load daily scores.",
+                  scoreError
+                );
+              }
             } catch (serverError) {
               console.error(
                 serverError
@@ -1705,6 +2184,22 @@ export default function App() {
         );
 
         setSyncStatus("synced");
+
+        try {
+          const serverScores =
+            await loadDayScores(
+              user.uid,
+              "server"
+            );
+
+          setDayScores(serverScores);
+          setServerReady(true);
+        } catch (scoreError) {
+          console.error(
+            "Could not load daily scores.",
+            scoreError
+          );
+        }
       } catch (error) {
         console.error(error);
         setSyncStatus("offline");
@@ -1763,6 +2258,8 @@ export default function App() {
       unit: data.unit || "",
       referenceAmount:
         Number(data.referenceAmount) || 1,
+      weight:
+        Math.max(0.01, Number(data.weight) || 1),
       order:
         existing?.order ??
         habits.length,
@@ -2269,6 +2766,132 @@ export default function App() {
     };
   }, [habits, today]);
 
+  const todayScore = useMemo(
+    () =>
+      roundScore(calculateDayScore(habits, today) ?? 0),
+    [habits, today]
+  );
+
+  const storedToday = dayScores[today];
+
+  /*
+   * Keep TODAY's score saved while the day is still running.
+   * Only today's document is ever written here.
+   */
+  useEffect(() => {
+    if (!user || !serverReady) return;
+    if (habits.length === 0) return;
+    if (storedToday === todayScore) return;
+    if (today !== dateKey()) return;
+
+    setDayScores((current) => ({
+      ...current,
+      [today]: todayScore,
+    }));
+
+    setDoc(DAY_SCORE_PATH(user.uid, today), {
+      date: today,
+      score: todayScore,
+      updatedAt: new Date().toISOString(),
+    }).catch((error) => {
+      console.error("Could not save daily score.", error);
+    });
+  }, [
+    user,
+    serverReady,
+    habits.length,
+    today,
+    todayScore,
+    storedToday,
+  ]);
+
+  /*
+   * Fill in past days that have no saved score yet
+   * (first run of this feature, or days the app was not
+   * opened). Days that already have a score are never touched.
+   */
+  useEffect(() => {
+    if (!user || !serverReady) return;
+    if (backfillBusy.current) return;
+    if (habits.length === 0) return;
+
+    const starts = new Map();
+    let earliest = null;
+
+    for (const habit of habits) {
+      const first = firstRecordKey(habit);
+
+      if (!first) continue;
+
+      starts.set(habit.id, first);
+
+      if (earliest === null || first < earliest) {
+        earliest = first;
+      }
+    }
+
+    if (!earliest) return;
+
+    const entries = {};
+
+    let cursor = parseDateKey(earliest);
+    const end = parseDateKey(today);
+    let guard = 0;
+
+    while (cursor < end && guard < 5000) {
+      const key = dateKey(cursor);
+
+      if (dayScores[key] === undefined) {
+        const score = calculateDayScore(habits, key, starts);
+
+        if (score !== null) {
+          entries[key] = roundScore(score);
+        }
+      }
+
+      cursor = addDays(cursor, 1);
+      guard += 1;
+    }
+
+    const keys = Object.keys(entries);
+
+    if (keys.length === 0) return;
+
+    backfillBusy.current = true;
+
+    setDayScores((current) => ({ ...entries, ...current }));
+
+    (async () => {
+      try {
+        for (let i = 0; i < keys.length; i += 400) {
+          const batch = writeBatch(db);
+
+          for (const key of keys.slice(i, i + 400)) {
+            batch.set(DAY_SCORE_PATH(user.uid, key), {
+              date: key,
+              score: entries[key],
+              updatedAt: new Date().toISOString(),
+            });
+          }
+
+          await batch.commit();
+        }
+      } catch (error) {
+        console.error("Could not save past daily scores.", error);
+      } finally {
+        backfillBusy.current = false;
+      }
+    })();
+  }, [user, serverReady, habits, dayScores, today]);
+
+  const scoresForCalendar = useMemo(
+    () =>
+      habits.length > 0
+        ? { ...dayScores, [today]: todayScore }
+        : dayScores,
+    [dayScores, habits.length, today, todayScore]
+  );
+
   const selectedHabit =
     selectedHabitId
       ? habits.find(
@@ -2295,6 +2918,22 @@ export default function App() {
 
   if (!user) {
     return <LoginScreen />;
+  }
+
+  /* -------------------------------------------------------
+     DAY SCORE DETAILS PAGE
+  ------------------------------------------------------- */
+
+  if (showDayDetails) {
+    return (
+      <div className="app-shell">
+        <DayScoreDetails
+          scores={scoresForCalendar}
+          today={today}
+          onBack={() => setShowDayDetails(false)}
+        />
+      </div>
+    );
   }
 
   /* -------------------------------------------------------
@@ -2442,20 +3081,27 @@ export default function App() {
           </div>
 
           <div className="today-summary-progress">
+            <div className="ds-bar-label">Day score</div>
+
             <div className="summary-percent">
-              {Math.round(
-                todayStats.percent
-              )}
-              %
+              {formatScore(todayScore)}%
             </div>
 
             <div className="summary-track">
               <div
                 style={{
-                  width: `${todayStats.percent}%`,
+                  width: `${Math.min(100, todayScore)}%`,
                 }}
               />
             </div>
+
+            <button
+              className="ds-view-details"
+              onClick={() => setShowDayDetails(true)}
+            >
+              View details
+              <ChevronRight size={16} />
+            </button>
           </div>
         </section>
 
