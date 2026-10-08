@@ -1557,3 +1557,270 @@ h3 {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* =========================================================
+   DAILY SCORE
+========================================================= */
+
+.ds-bar-label {
+  margin-bottom: 2px;
+
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ds-view-details {
+  margin-top: 12px;
+  padding: 0;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+
+  border: 0;
+  background: transparent;
+
+  color: var(--primary-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ds-view-details:hover {
+  text-decoration: underline;
+}
+
+.ds-top-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+
+  margin-bottom: 34px;
+}
+
+.ds-card {
+  padding: 20px;
+
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+
+  box-shadow: 0 3px 15px rgba(15, 23, 42, 0.035);
+}
+
+.ds-card-label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ds-big {
+  margin: 8px 0 4px;
+
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+
+.ds-card-sub {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.ds-range-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+
+  margin-top: 12px;
+}
+
+.ds-range-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ds-range-row input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+
+  padding: 0 10px;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: white;
+  color: var(--text);
+
+  outline: none;
+}
+
+.ds-range-row input:focus {
+  border-color: #86efac;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+}
+
+.ds-calendar-section {
+  padding-bottom: 60px;
+}
+
+.ds-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.ds-legend-bar {
+  width: 90px;
+  height: 10px;
+
+  border-radius: 999px;
+
+  background: linear-gradient(
+    to right,
+    rgba(22, 163, 74, 0.1),
+    rgba(22, 163, 74, 1)
+  );
+}
+
+.ds-legend-none {
+  width: 14px;
+  height: 14px;
+
+  margin-left: 8px;
+
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+
+  background: var(--surface-soft);
+}
+
+.ds-months {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 16px;
+}
+
+.ds-month {
+  padding: 18px;
+
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+
+  box-shadow: 0 3px 15px rgba(15, 23, 42, 0.035);
+}
+
+.ds-month-title {
+  margin-bottom: 12px;
+
+  font-size: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.ds-weekdays,
+.ds-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ds-weekdays {
+  margin-bottom: 6px;
+
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.ds-cell {
+  aspect-ratio: 1 / 1;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+
+  border-radius: 10px;
+
+  line-height: 1;
+}
+
+.ds-pad {
+  visibility: hidden;
+}
+
+.ds-day-num {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ds-day-score {
+  font-size: 0.6rem;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.ds-empty {
+  background: var(--surface-soft);
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+}
+
+.ds-future {
+  opacity: 0.4;
+}
+
+.ds-today {
+  outline: 2px solid #0f172a;
+  outline-offset: 1px;
+}
+
+@media (max-width: 760px) {
+  .ds-top-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ds-months {
+    grid-template-columns: 1fr;
+  }
+
+  .ds-month {
+    padding: 14px;
+  }
+
+  .ds-weekdays,
+  .ds-grid {
+    gap: 4px;
+  }
+
+  .ds-cell {
+    border-radius: 8px;
+  }
+
+  .ds-legend-bar {
+    width: 60px;
+  }
+
+  .ds-calendar-section .section-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
