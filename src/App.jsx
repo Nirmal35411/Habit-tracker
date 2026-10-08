@@ -77,9 +77,7 @@ async function migrateLegacyRecords(
   habitId,
   records
 ) {
-  const entries = Object.entries(
-    records || {}
-  );
+  const entries = Object.entries(records || {});
 
   if (entries.length === 0) {
     return;
@@ -143,29 +141,24 @@ async function loadHabitRecords(
   userId,
   habitId
 ) {
-  const recordsSnapshot =
-    await getDocs(
-      collection(
-        db,
-        "users",
-        userId,
-        "habits",
-        habitId,
-        "records"
-      )
-    );
+  const recordsSnapshot = await getDocs(
+    collection(
+      db,
+      "users",
+      userId,
+      "habits",
+      habitId,
+      "records"
+    )
+  );
 
   const records = {};
 
-  recordsSnapshot.forEach(
-    (recordDoc) => {
-      const data =
-        recordDoc.data();
+  recordsSnapshot.forEach((recordDoc) => {
+    const data = recordDoc.data();
 
-      records[recordDoc.id] =
-        data.value;
-    }
-  );
+    records[recordDoc.id] = data.value;
+  });
 
   return records;
 }
@@ -174,16 +167,12 @@ async function loadHabitRecords(
    HABIT HELPERS
    ========================================================= */
 
-function intensity(
-  value,
-  reference
-) {
+function intensity(value, reference) {
   if (!value || !reference) {
     return 0;
   }
 
-  const ratio =
-    value / reference;
+  const ratio = value / reference;
 
   if (ratio >= 1) return 4;
   if (ratio >= 0.75) return 3;
@@ -198,13 +187,11 @@ function getStreak(habit) {
   let streak = 0;
 
   while (true) {
-    const key =
-      date
-        .toISOString()
-        .slice(0, 10);
+    const key = date
+      .toISOString()
+      .slice(0, 10);
 
-    const value =
-      habit.records?.[key];
+    const value = habit.records?.[key];
 
     const successful =
       habit.type === "boolean"
@@ -252,20 +239,16 @@ function Calendar({ habit }) {
     <div className="calendar-wrapper">
       <div className="calendar">
         {days.map((date) => {
-          const key =
-            date
-              .toISOString()
-              .slice(0, 10);
+          const key = date
+            .toISOString()
+            .slice(0, 10);
 
           const value =
             habit.records?.[key];
 
           let level = 0;
 
-          if (
-            habit.type ===
-            "boolean"
-          ) {
+          if (habit.type === "boolean") {
             level = value ? 4 : 0;
           } else {
             level = intensity(
@@ -279,8 +262,7 @@ function Calendar({ habit }) {
               key={key}
               className={`day level-${level}`}
               title={`${key}: ${
-                habit.type ===
-                "boolean"
+                habit.type === "boolean"
                   ? value
                     ? "Done"
                     : "Not done"
@@ -307,8 +289,7 @@ function HabitCard({
   const todayValue =
     habit.records?.[today];
 
-  const streak =
-    getStreak(habit);
+  const streak = getStreak(habit);
 
   return (
     <div className="habit-card">
@@ -320,43 +301,30 @@ function HabitCard({
           />
 
           <div>
-            <h2>
-              {habit.name}
-            </h2>
+            <h2>{habit.name}</h2>
 
-            {habit.type ===
-            "numeric" ? (
+            {habit.type === "numeric" ? (
               <p>
                 Reference:{" "}
-                {
-                  habit.referenceAmount
-                }{" "}
+                {habit.referenceAmount}{" "}
                 {habit.unit}
               </p>
             ) : (
-              <p>
-                Yes / No habit
-              </p>
+              <p>Yes / No habit</p>
             )}
           </div>
         </div>
 
         <div className="habit-actions">
           <button
-            onClick={() =>
-              onEdit(habit)
-            }
+            onClick={() => onEdit(habit)}
             title="Edit"
           >
-            <Settings
-              size={17}
-            />
+            <Settings size={17} />
           </button>
 
           <button
-            onClick={() =>
-              onDelete(habit)
-            }
+            onClick={() => onDelete(habit)}
             title="Move to bin"
           >
             <Trash2 size={17} />
@@ -370,28 +338,19 @@ function HabitCard({
         <div className="streak">
           <Flame size={17} />
 
-          <strong>
-            {streak}
-          </strong>
+          <strong>{streak}</strong>
 
-          <span>
-            day streak
-          </span>
+          <span>day streak</span>
         </div>
 
         <button
           className="today-button"
-          onClick={() =>
-            onToggleToday(habit)
-          }
+          onClick={() => onToggleToday(habit)}
         >
-          {habit.type ===
-          "boolean" ? (
+          {habit.type === "boolean" ? (
             todayValue ? (
               <>
-                <Check
-                  size={17}
-                />
+                <Check size={17} />
                 Done
               </>
             ) : (
@@ -402,8 +361,7 @@ function HabitCard({
             )
           ) : (
             <>
-              Today:{" "}
-              {todayValue || 0}{" "}
+              Today: {todayValue || 0}{" "}
               {habit.unit}
             </>
           )}
@@ -417,25 +375,18 @@ function HabitCard({
    LOGIN SCREEN
    ========================================================= */
 
-function LoginScreen({
-  onLogin,
-}) {
+function LoginScreen({ onLogin }) {
   return (
     <div className="login-screen">
       <div className="login-card">
         <div className="login-icon">
-          <CalendarDays
-            size={32}
-          />
+          <CalendarDays size={32} />
         </div>
 
-        <h1>
-          Habit Tracker
-        </h1>
+        <h1>Habit Tracker</h1>
 
         <p>
-          Track your habits,
-          build consistency,
+          Track your habits, build consistency,
           and see your progress.
         </p>
 
@@ -455,27 +406,17 @@ function LoginScreen({
    ========================================================= */
 
 function App() {
-  /*
-   * undefined means Firebase is still determining
-   * whether the user is logged in.
-   *
-   * null means the user is definitely logged out.
-   */
   const [user, setUser] =
     useState(undefined);
 
   const [isOnline, setIsOnline] =
-    useState(
-      navigator.onLine
-    );
+    useState(navigator.onLine);
 
   const [habits, setHabits] =
     useState([]);
 
-  const [
-    loadingHabits,
-    setLoadingHabits,
-  ] = useState(false);
+  const [loadingHabits, setLoadingHabits] =
+    useState(false);
 
   const [view, setView] =
     useState("habits");
@@ -483,10 +424,8 @@ function App() {
   const [showAdd, setShowAdd] =
     useState(false);
 
-  const [
-    editingHabit,
-    setEditingHabit,
-  ] = useState(null);
+  const [editingHabit, setEditingHabit] =
+    useState(null);
 
   /* =======================================================
      AUTH STATE
@@ -514,10 +453,6 @@ function App() {
             error
           );
 
-          /*
-           * If authentication initialization fails,
-           * don't leave the app stuck on Loading forever.
-           */
           setUser(null);
         }
       );
@@ -576,18 +511,15 @@ function App() {
       try {
         setLoadingHabits(true);
 
-        const habitsRef =
-          collection(
-            db,
-            "users",
-            user.uid,
-            "habits"
-          );
+        const habitsRef = collection(
+          db,
+          "users",
+          user.uid,
+          "habits"
+        );
 
         const snapshot =
-          await getDocs(
-            habitsRef
-          );
+          await getDocs(habitsRef);
 
         /* =================================================
            NEW USER
@@ -604,21 +536,19 @@ function App() {
 
           for (
             let i = 0;
-            i <
-            initialHabits.length;
+            i < initialHabits.length;
             i++
           ) {
             const habit =
               initialHabits[i];
 
-            const habitRef =
-              doc(
-                db,
-                "users",
-                user.uid,
-                "habits",
-                habit.id
-              );
+            const habitRef = doc(
+              db,
+              "users",
+              user.uid,
+              "habits",
+              habit.id
+            );
 
             const {
               records,
@@ -658,16 +588,10 @@ function App() {
         const loadedHabits = [];
 
         for (
-          const item of
-          snapshot.docs
+          const item of snapshot.docs
         ) {
-          const data =
-            item.data();
+          const data = item.data();
 
-          /*
-           * Migrate old embedded records
-           * if they still exist.
-           */
           if (
             data.records &&
             typeof data.records ===
@@ -680,10 +604,6 @@ function App() {
             );
           }
 
-          /*
-           * Load records from the
-           * records subcollection.
-           */
           const records =
             await loadHabitRecords(
               user.uid,
@@ -789,15 +709,13 @@ function App() {
         const exists =
           current.some(
             (item) =>
-              item.id ===
-              habit.id
+              item.id === habit.id
           );
 
         if (exists) {
           return current.map(
             (item) =>
-              item.id ===
-              habit.id
+              item.id === habit.id
                 ? habit
                 : item
           );
@@ -821,7 +739,7 @@ function App() {
   }
 
   /* =======================================================
-     SAVE TODAY'S RECORD
+     TOGGLE / SAVE TODAY'S RECORD
      ======================================================= */
 
   async function toggleToday(habit) {
@@ -831,30 +749,23 @@ function App() {
       let value;
 
       if (
-        habit.type ===
-        "boolean"
+        habit.type === "boolean"
       ) {
         value =
-          !habit.records?.[
-            today
-          ];
+          !habit.records?.[today];
       } else {
         const current =
           Number(
-            habit.records?.[
-              today
-            ] || 0
+            habit.records?.[today] ||
+              0
           );
 
-        const amount =
-          prompt(
-            `Enter today's amount in ${habit.unit}:`,
-            current
-          );
+        const amount = prompt(
+          `Enter today's amount in ${habit.unit}:`,
+          current
+        );
 
-        if (
-          amount === null
-        ) {
+        if (amount === null) {
           return;
         }
 
@@ -874,15 +785,9 @@ function App() {
           return;
         }
 
-        value =
-          numericAmount;
+        value = numericAmount;
       }
 
-      /*
-       * Firestore offline persistence
-       * automatically queues this write
-       * when the device is offline.
-       */
       await setDoc(
         doc(
           db,
@@ -898,30 +803,22 @@ function App() {
         }
       );
 
-      /*
-       * Update UI immediately.
-       */
-      setHabits(
-        (current) =>
-          current.map(
-            (item) => {
-              if (
-                item.id !==
-                habit.id
-              ) {
-                return item;
-              }
+      setHabits((current) =>
+        current.map((item) => {
+          if (
+            item.id !== habit.id
+          ) {
+            return item;
+          }
 
-              return {
-                ...item,
-                records: {
-                  ...item.records,
-                  [today]:
-                    value,
-                },
-              };
-            }
-          )
+          return {
+            ...item,
+            records: {
+              ...item.records,
+              [today]: value,
+            },
+          };
+        })
       );
     } catch (error) {
       console.error(
@@ -948,11 +845,9 @@ function App() {
       return;
     }
 
-    const habit =
-      habits.find(
-        (item) =>
-          item.id === id
-      );
+    const habit = habits.find(
+      (item) => item.id === id
+    );
 
     if (!habit) return;
 
@@ -969,11 +864,9 @@ function App() {
      ======================================================= */
 
   async function restore(id) {
-    const habit =
-      habits.find(
-        (item) =>
-          item.id === id
-      );
+    const habit = habits.find(
+      (item) => item.id === id
+    );
 
     if (!habit) return;
 
@@ -988,9 +881,7 @@ function App() {
      PERMANENT DELETE
      ======================================================= */
 
-  async function permanentlyDelete(
-    id
-  ) {
+  async function permanentlyDelete(id) {
     if (
       !confirm(
         "Permanently delete this habit and ALL of its data? This cannot be undone."
@@ -1035,12 +926,11 @@ function App() {
         )
       );
 
-      setHabits(
-        (current) =>
-          current.filter(
-            (habit) =>
-              habit.id !== id
-          )
+      setHabits((current) =>
+        current.filter(
+          (habit) =>
+            habit.id !== id
+        )
       );
     } catch (error) {
       console.error(
@@ -1082,8 +972,7 @@ function App() {
     const existing =
       habits.find(
         (habit) =>
-          habit.id ===
-          data.id
+          habit.id === data.id
       );
 
     if (!existing) return;
@@ -1093,9 +982,7 @@ function App() {
       ...data,
     });
 
-    setEditingHabit(
-      null
-    );
+    setEditingHabit(null);
   }
 
   /* =======================================================
@@ -1115,8 +1002,7 @@ function App() {
 
     if (
       target < 0 ||
-      target >=
-        sorted.length
+      target >= sorted.length
     ) {
       return;
     }
@@ -1153,9 +1039,7 @@ function App() {
     return (
       <div className="login-screen">
         <div className="login-card">
-          <p>
-            Loading...
-          </p>
+          <p>Loading...</p>
         </div>
       </div>
     );
@@ -1212,10 +1096,8 @@ function App() {
             {new Date().toLocaleDateString(
               undefined,
               {
-                weekday:
-                  "long",
-                month:
-                  "long",
+                weekday: "long",
+                month: "long",
                 day: "numeric",
               }
             )}
@@ -1264,9 +1146,7 @@ function App() {
             }
             title="Sign out"
           >
-            <LogOut
-              size={18}
-            />
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -1279,9 +1159,7 @@ function App() {
               : ""
           }
           onClick={() =>
-            setView(
-              "habits"
-            )
+            setView("habits")
           }
         >
           <CalendarDays
@@ -1293,15 +1171,12 @@ function App() {
 
         <button
           className={
-            view ===
-            "statistics"
+            view === "statistics"
               ? "active"
               : ""
           }
           onClick={() =>
-            setView(
-              "statistics"
-            )
+            setView("statistics")
           }
         >
           <BarChart3
@@ -1321,9 +1196,7 @@ function App() {
             setView("bin")
           }
         >
-          <Archive
-            size={18}
-          />
+          <Archive size={18} />
 
           Bin
         </button>
@@ -1343,8 +1216,7 @@ function App() {
           </div>
         ) : (
           <>
-            {view ===
-              "habits" && (
+            {view === "habits" && (
               <section>
                 {activeHabits.length ===
                 0 ? (
@@ -1467,8 +1339,7 @@ function App() {
                             ) =>
                               a +
                               Number(
-                                b ||
-                                  0
+                                b || 0
                               ),
                             0
                           );
@@ -1499,8 +1370,7 @@ function App() {
               </section>
             )}
 
-            {view ===
-              "bin" && (
+            {view === "bin" && (
               <section className="panel">
                 <h2>
                   Bin
@@ -1509,8 +1379,7 @@ function App() {
                 {deletedHabits.length ===
                 0 ? (
                   <div className="empty-small">
-                    The bin is
-                    empty.
+                    The bin is empty.
                   </div>
                 ) : (
                   deletedHabits.map(
@@ -1547,9 +1416,7 @@ function App() {
                             }
                           >
                             <RotateCcw
-                              size={
-                                16
-                              }
+                              size={16}
                             />
 
                             Restore
@@ -1564,13 +1431,10 @@ function App() {
                             }
                           >
                             <Trash2
-                              size={
-                                16
-                              }
+                              size={16}
                             />
 
-                            Delete
-                            permanently
+                            Delete permanently
                           </button>
                         </div>
                       </div>
@@ -1590,13 +1454,8 @@ function App() {
             editingHabit
           }
           onClose={() => {
-            setShowAdd(
-              false
-            );
-
-            setEditingHabit(
-              null
-            );
+            setShowAdd(false);
+            setEditingHabit(null);
           }}
           onSave={
             editingHabit
@@ -1655,13 +1514,11 @@ function HabitModal({
       name: name.trim(),
       type,
       unit:
-        type ===
-        "numeric"
+        type === "numeric"
           ? unit
           : "",
       referenceAmount:
-        type ===
-        "numeric"
+        type === "numeric"
           ? Number(
               referenceAmount
             )
@@ -1673,9 +1530,7 @@ function HabitModal({
     <div className="modal-backdrop">
       <form
         className="modal"
-        onSubmit={
-          submit
-        }
+        onSubmit={submit}
       >
         <h2>
           {habit
@@ -1719,17 +1574,14 @@ function HabitModal({
           </select>
         </label>
 
-        {type ===
-          "numeric" && (
+        {type === "numeric" && (
           <>
             <label>
               Unit
 
               <input
                 value={unit}
-                onChange={(
-                  e
-                ) =>
+                onChange={(e) =>
                   setUnit(
                     e.target.value
                   )
@@ -1748,9 +1600,7 @@ function HabitModal({
                 value={
                   referenceAmount
                 }
-                onChange={(
-                  e
-                ) =>
+                onChange={(e) =>
                   setReferenceAmount(
                     e.target.value
                   )
@@ -1773,9 +1623,7 @@ function HabitModal({
         <div className="modal-actions">
           <button
             type="button"
-            onClick={
-              onClose
-            }
+            onClick={onClose}
           >
             Cancel
           </button>
