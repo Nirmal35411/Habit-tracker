@@ -1,5 +1,9 @@
-```jsx
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
 import {
   Plus,
   Flame,
@@ -27,6 +31,7 @@ import {
   deleteField,
   doc,
   getDocs,
+  getDocsFromCache,
   setDoc,
   writeBatch,
 } from "firebase/firestore";
@@ -36,6 +41,10 @@ import {
   googleProvider,
   db,
 } from "./firebase";
+
+/* =========================================================
+   CONSTANTS
+   ========================================================= */
 
 const today = new Date()
   .toISOString()
@@ -54,6 +63,7 @@ const initialHabits = [
       [today]: 3,
     },
   },
+
   {
     id: "exercise",
     name: "Exercise",
@@ -69,21 +79,36 @@ const initialHabits = [
 ];
 
 /* =========================================================
-   FIRESTORE RECORD MIGRATION
+   FIRESTORE HELPERS
    ========================================================= */
 
-async function migrateLegacyRecords(
+function getHabitsCollection(userId) {
+  return collection(
+    db,
+    "users",
+    userId,
+    "habits"
+  );
+}
+
+function getHabitDocument(
   userId,
-  habitId,
-  records
+  habitId
 ) {
-  const entries = Object.entries(records || {});
+  return doc(
+    db,
+    "users",
+    userId,
+    "habits",
+    habitId
+  );
+}
 
-  if (entries.length === 0) {
-    return;
-  }
-
-  const recordsPath = collection(
+function getRecordsCollection(
+  userId,
+  habitId
+) {
+  return collection(
     db,
     "users",
     userId,
@@ -91,6 +116,46 @@ async function migrateLegacyRecords(
     habitId,
     "records"
   );
+}
+
+function getRecordDocument(
+  userId,
+  habitId,
+  date
+) {
+  return doc(
+    db,
+    "users",
+    userId,
+    "habits",
+    habitId,
+    "records",
+    date
+  );
+}
+
+/* =========================================================
+   LEGACY RECORD MIGRATION
+   ========================================================= */
+
+async function migrateLegacyRecords(
+  userId,
+  habitId,
+  records
+) {
+  const entries = Object.entries(
+    records || {}
+  );
+
+  if (entries.length === 0) {
+    return;
+  }
+
+  const recordsPath =
+    getRecordsCollection(
+      userId,
+      habitId
+    );
 
   const chunkSize = 400;
 
@@ -104,28 +169,27 @@ async function migrateLegacyRecords(
       start + chunkSize
     );
 
-    const batch = writeBatch(db);
+    const batch =
+      writeBatch(db);
 
-    for (const [date, value] of chunk) {
-      const recordRef = doc(
-        recordsPath,
-        date
+    for (const [
+      date,
+      value,
+    ] of chunk) {
+      batch.set(
+        doc(recordsPath, date),
+        {
+          value,
+        }
       );
-
-      batch.set(recordRef, {
-        value,
-      });
     }
 
     await batch.commit();
   }
 
   await setDoc(
-    doc(
-      db,
-      "users",
+    getHabitDocument(
       userId,
-      "habits",
       habitId
     ),
     {
@@ -137,42 +201,152 @@ async function migrateLegacyRecords(
   );
 }
 
+/* =========================================================
+   LOAD RECORDS
+   ========================================================= */
+
 async function loadHabitRecords(
   userId,
-  habitId
+  habitId,
+  source = "server"
 ) {
-  const recordsSnapshot = await getDocs(
-    collection(
-      db,
-      "users",
+  const recordsRef =
+    getRecordsCollection(
       userId,
-      "habits",
-      habitId,
-      "records"
-    )
-  );
+      habitId
+    );
+
+  let snapshot;
+
+  if (source === "cache") {
+    snapshot =
+      await getDocsFromCache(
+        recordsRef
+      );
+  } else {
+    snapshot =
+      await getDocs(recordsRef);
+  }
 
   const records = {};
 
-  recordsSnapshot.forEach((recordDoc) => {
-    const data = recordDoc.data();
+  snapshot.forEach(
+    (recordDoc) => {
+      const data =
+        recordDoc.data();
 
-    records[recordDoc.id] = data.value;
-  });
+      records[recordDoc.id] =
+        data.value;
+    }
+  );
 
   return records;
+}
+
+/* =========================================================
+   LOAD HABITS FROM FIRESTORE
+   ========================================================= */
+
+async function loadHabitsFromSource(
+  userId,
+  source
+) {
+  const habitsRef =
+    getHabitsCollection(userId);
+
+  let snapshot;
+
+  if (source === "cache") {
+    snapshot =
+      await getDocsFromCache(
+        habitsRef
+      );
+  } else {
+    snapshot =
+      await getDocs(habitsRef);
+  }
+
+  const loadedHabits = [];
+
+  for (const item of snapshot.docs) {
+    const data = item.data();
+
+    /*
+      Older versions stored records directly
+      inside the habit document.
+
+      We continue supporting that format so
+      existing user data is not lost.
+    */
+    if (
+      data.records &&
+      typeof data.records ===
+        "object"
+    ) {
+      loadedHabits.push({
+        id: item.id,
+        ...data,
+        records: {
+          ...data.records,
+        },
+      });
+
+      /*
+        Migration is handled separately after
+        the online server refresh.
+      */
+      continue;
+    }
+
+    let records = {};
+
+    try {
+      records =
+        await loadHabitRecords(
+          userId,
+          item.id,
+          source
+        );
+    } catch (error) {
+      console.warn(
+        `Could not load records for ${item.id}:`,
+        error
+      );
+    }
+
+    loadedHabits.push({
+      id: item.id,
+      ...data,
+      records,
+    });
+  }
+
+  return {
+    habits: loadedHabits,
+    empty: snapshot.empty,
+  };
 }
 
 /* =========================================================
    HABIT HELPERS
    ========================================================= */
 
-function intensity(value, reference) {
-  if (!value || !reference) {
+function intensity(
+  value,
+  reference
+) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === "" ||
+    !reference
+  ) {
     return 0;
   }
 
-  const ratio = value / reference;
+  const ratio =
+    Number(value) /
+    Number(reference);
 
   if (ratio >= 1) return 4;
   if (ratio >= 0.75) return 3;
@@ -184,6 +358,7 @@ function intensity(value, reference) {
 
 function getStreak(habit) {
   let date = new Date();
+
   let streak = 0;
 
   while (true) {
@@ -191,13 +366,16 @@ function getStreak(habit) {
       .toISOString()
       .slice(0, 10);
 
-    const value = habit.records?.[key];
+    const value =
+      habit.records?.[key];
 
     const successful =
       habit.type === "boolean"
         ? value === true
         : Number(value || 0) >=
-          habit.referenceAmount;
+          Number(
+            habit.referenceAmount
+          );
 
     if (!successful) {
       break;
@@ -220,10 +398,16 @@ function getStreak(habit) {
 function Calendar({ habit }) {
   const days = useMemo(() => {
     const result = [];
+
     const now = new Date();
 
-    for (let i = 89; i >= 0; i--) {
-      const date = new Date(now);
+    for (
+      let i = 89;
+      i >= 0;
+      i--
+    ) {
+      const date =
+        new Date(now);
 
       date.setDate(
         now.getDate() - i
@@ -248,7 +432,10 @@ function Calendar({ habit }) {
 
           let level = 0;
 
-          if (habit.type === "boolean") {
+          if (
+            habit.type ===
+            "boolean"
+          ) {
             level = value ? 4 : 0;
           } else {
             level = intensity(
@@ -262,11 +449,15 @@ function Calendar({ habit }) {
               key={key}
               className={`day level-${level}`}
               title={`${key}: ${
-                habit.type === "boolean"
+                habit.type ===
+                "boolean"
                   ? value
                     ? "Done"
                     : "Not done"
-                  : `${value || 0} ${habit.unit}`
+                  : `${value || 0} ${
+                      habit.unit ||
+                      ""
+                    }`
               }`}
             />
           );
@@ -289,7 +480,8 @@ function HabitCard({
   const todayValue =
     habit.records?.[today];
 
-  const streak = getStreak(habit);
+  const streak =
+    getStreak(habit);
 
   return (
     <div className="habit-card">
@@ -301,67 +493,98 @@ function HabitCard({
           />
 
           <div>
-            <h2>{habit.name}</h2>
+            <h2>
+              {habit.name}
+            </h2>
 
-            {habit.type === "numeric" ? (
+            {habit.type ===
+            "numeric" ? (
               <p>
                 Reference:{" "}
-                {habit.referenceAmount}{" "}
+                {
+                  habit.referenceAmount
+                }{" "}
                 {habit.unit}
               </p>
             ) : (
-              <p>Yes / No habit</p>
+              <p>
+                Yes / No habit
+              </p>
             )}
           </div>
         </div>
 
         <div className="habit-actions">
           <button
-            onClick={() => onEdit(habit)}
+            onClick={() =>
+              onEdit(habit)
+            }
             title="Edit"
           >
-            <Settings size={17} />
+            <Settings
+              size={17}
+            />
           </button>
 
           <button
-            onClick={() => onDelete(habit)}
+            onClick={() =>
+              onDelete(habit.id)
+            }
             title="Move to bin"
           >
-            <Trash2 size={17} />
+            <Trash2
+              size={17}
+            />
           </button>
         </div>
       </div>
 
-      <Calendar habit={habit} />
+      <Calendar
+        habit={habit}
+      />
 
       <div className="habit-footer">
         <div className="streak">
           <Flame size={17} />
 
-          <strong>{streak}</strong>
+          <strong>
+            {streak}
+          </strong>
 
-          <span>day streak</span>
+          <span>
+            day streak
+          </span>
         </div>
 
         <button
           className="today-button"
-          onClick={() => onToggleToday(habit)}
+          onClick={() =>
+            onToggleToday(habit)
+          }
         >
-          {habit.type === "boolean" ? (
+          {habit.type ===
+          "boolean" ? (
             todayValue ? (
               <>
-                <Check size={17} />
+                <Check
+                  size={17}
+                />
+
                 Done
               </>
             ) : (
               <>
-                <X size={17} />
+                <X
+                  size={17}
+                />
+
                 Mark done
               </>
             )
           ) : (
             <>
-              Today: {todayValue || 0}{" "}
+              Today:{" "}
+              {todayValue || 0}{" "}
               {habit.unit}
             </>
           )}
@@ -375,18 +598,25 @@ function HabitCard({
    LOGIN SCREEN
    ========================================================= */
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({
+  onLogin,
+}) {
   return (
     <div className="login-screen">
       <div className="login-card">
         <div className="login-icon">
-          <CalendarDays size={32} />
+          <CalendarDays
+            size={32}
+          />
         </div>
 
-        <h1>Habit Tracker</h1>
+        <h1>
+          Habit Tracker
+        </h1>
 
         <p>
-          Track your habits, build consistency,
+          Track your habits,
+          build consistency,
           and see your progress.
         </p>
 
@@ -410,13 +640,22 @@ function App() {
     useState(undefined);
 
   const [isOnline, setIsOnline] =
-    useState(navigator.onLine);
+    useState(
+      navigator.onLine
+    );
+
+  const [
+    syncStatus,
+    setSyncStatus,
+  ] = useState("Starting...");
 
   const [habits, setHabits] =
     useState([]);
 
-  const [loadingHabits, setLoadingHabits] =
-    useState(false);
+  const [
+    loadingHabits,
+    setLoadingHabits,
+  ] = useState(false);
 
   const [view, setView] =
     useState("habits");
@@ -424,32 +663,27 @@ function App() {
   const [showAdd, setShowAdd] =
     useState(false);
 
-  const [editingHabit, setEditingHabit] =
-    useState(null);
+  const [
+    editingHabit,
+    setEditingHabit,
+  ] = useState(null);
 
   /* =======================================================
      AUTH STATE
      ======================================================= */
 
   useEffect(() => {
-    console.log(
-      "AUTH: listener starting"
-    );
-
     const unsubscribe =
       onAuthStateChanged(
         auth,
         (currentUser) => {
-          console.log(
-            "AUTH: state received",
+          setUser(
             currentUser
           );
-
-          setUser(currentUser);
         },
         (error) => {
           console.error(
-            "AUTH: listener error",
+            "AUTH ERROR:",
             error
           );
 
@@ -471,6 +705,10 @@ function App() {
 
     function handleOffline() {
       setIsOnline(false);
+
+      setSyncStatus(
+        "Offline — saved locally"
+      );
     }
 
     window.addEventListener(
@@ -497,144 +735,323 @@ function App() {
   }, []);
 
   /* =======================================================
-     LOAD HABITS + MIGRATE OLD RECORDS
+     LOAD LOCAL CACHE FIRST
+     ======================================================= */
+
+  async function loadLocalHabits(
+    currentUser
+  ) {
+    try {
+      const result =
+        await loadHabitsFromSource(
+          currentUser.uid,
+          "cache"
+        );
+
+      setHabits(
+        result.habits
+      );
+
+      return result;
+    } catch (error) {
+      console.warn(
+        "No local Firestore cache available:",
+        error
+      );
+
+      return {
+        habits: [],
+        empty: true,
+      };
+    }
+  }
+
+  /* =======================================================
+     REFRESH FROM SERVER
+     ======================================================= */
+
+  async function refreshFromServer(
+    currentUser
+  ) {
+    if (!navigator.onLine) {
+      return;
+    }
+
+    try {
+      setSyncStatus(
+        "Syncing..."
+      );
+
+      const result =
+        await loadHabitsFromSource(
+          currentUser.uid,
+          "server"
+        );
+
+      let serverHabits =
+        result.habits;
+
+      /*
+        If this is genuinely a new account,
+        create the initial habits.
+      */
+      if (
+        result.empty
+      ) {
+        for (
+          const habit of initialHabits
+        ) {
+          const {
+            records,
+            ...habitData
+          } = habit;
+
+          /*
+            Firestore persistence makes this
+            write immediately available locally
+            even if connectivity disappears.
+          */
+          setDoc(
+            getHabitDocument(
+              currentUser.uid,
+              habit.id
+            ),
+            habitData
+          ).catch((error) => {
+            console.error(
+              "Initial habit sync failed:",
+              error
+            );
+          });
+
+          for (const [
+            date,
+            value,
+          ] of Object.entries(
+            records
+          )) {
+            setDoc(
+              getRecordDocument(
+                currentUser.uid,
+                habit.id,
+                date
+              ),
+              {
+                value,
+              }
+            ).catch((error) => {
+              console.error(
+                "Initial record sync failed:",
+                error
+              );
+            });
+          }
+        }
+
+        serverHabits =
+          initialHabits.map(
+            (habit) => ({
+              ...habit,
+              records: {
+                ...habit.records,
+              },
+            })
+          );
+      }
+
+      /*
+        Migrate old embedded records.
+      */
+      for (
+        const habit of serverHabits
+      ) {
+        if (
+          habit.records &&
+          typeof habit.records ===
+            "object"
+        ) {
+          /*
+            If the server version came from
+            the old embedded-record format,
+            migrate those records.
+          */
+          try {
+            const habitDoc =
+              await getDocs(
+                getRecordsCollection(
+                  currentUser.uid,
+                  habit.id
+                )
+              );
+
+            /*
+              Only migrate if the records
+              subcollection is empty.
+            */
+            if (
+              habitDoc.empty
+            ) {
+              await migrateLegacyRecords(
+                currentUser.uid,
+                habit.id,
+                habit.records
+              );
+            }
+          } catch (error) {
+            console.warn(
+              "Legacy migration skipped:",
+              error
+            );
+          }
+        }
+      }
+
+      /*
+        Reload after migration so the app uses
+        the new records/{date} structure.
+      */
+      try {
+        const refreshed =
+          await loadHabitsFromSource(
+            currentUser.uid,
+            "server"
+          );
+
+        serverHabits =
+          refreshed.habits;
+      } catch (error) {
+        console.warn(
+          "Final refresh failed:",
+          error
+        );
+      }
+
+      setHabits(
+        serverHabits
+      );
+
+      setSyncStatus(
+        "Synced"
+      );
+    } catch (error) {
+      console.error(
+        "Server refresh failed:",
+        error
+      );
+
+      /*
+        Do NOT erase local data if server
+        access fails.
+      */
+
+      setSyncStatus(
+        navigator.onLine
+          ? "Using local data"
+          : "Offline — saved locally"
+      );
+    }
+  }
+
+  /* =======================================================
+     INITIAL DATA LOAD
      ======================================================= */
 
   useEffect(() => {
-    async function loadHabits() {
+    let cancelled =
+      false;
+
+    async function initializeUser() {
       if (!user) {
         setHabits([]);
         setLoadingHabits(false);
+        setSyncStatus(
+          "Not signed in"
+        );
         return;
       }
 
-      try {
-        setLoadingHabits(true);
+      /*
+        Important:
+        We do NOT wait for the server before
+        displaying the app.
+      */
+      setLoadingHabits(true);
 
-        const habitsRef = collection(
-          db,
-          "users",
-          user.uid,
-          "habits"
+      const local =
+        await loadLocalHabits(
+          user
         );
 
-        const snapshot =
-          await getDocs(habitsRef);
+      if (cancelled) {
+        return;
+      }
 
-        /* =================================================
-           NEW USER
-           ================================================= */
+      setHabits(
+        local.habits
+      );
 
-        if (snapshot.empty) {
-          const seededHabits =
-            initialHabits.map(
-              (habit) => ({
-                ...habit,
-                records: {},
-              })
-            );
+      /*
+        Local cache has now loaded, so
+        the UI can immediately render.
+      */
+      setLoadingHabits(false);
 
-          for (
-            let i = 0;
-            i < initialHabits.length;
-            i++
-          ) {
-            const habit =
-              initialHabits[i];
-
-            const habitRef = doc(
-              db,
-              "users",
-              user.uid,
-              "habits",
-              habit.id
-            );
-
-            const {
-              records,
-              ...habitData
-            } = habit;
-
-            await setDoc(
-              habitRef,
-              habitData
-            );
-
-            await migrateLegacyRecords(
-              user.uid,
-              habit.id,
-              records
-            );
-
-            seededHabits[i] = {
-              ...habitData,
-              records: {
-                ...records,
-              },
-            };
-          }
-
-          setHabits(
-            seededHabits
-          );
-
-          return;
-        }
-
-        /* =================================================
-           EXISTING USER
-           ================================================= */
-
-        const loadedHabits = [];
-
-        for (
-          const item of snapshot.docs
-        ) {
-          const data = item.data();
-
-          if (
-            data.records &&
-            typeof data.records ===
-              "object"
-          ) {
-            await migrateLegacyRecords(
-              user.uid,
-              item.id,
-              data.records
-            );
-          }
-
-          const records =
-            await loadHabitRecords(
-              user.uid,
-              item.id
-            );
-
-          loadedHabits.push({
-            id: item.id,
-            ...data,
-            records,
-          });
-        }
-
-        setHabits(
-          loadedHabits
-        );
-      } catch (error) {
-        console.error(
-          "Failed to load habits:",
-          error
+      if (
+        navigator.onLine
+      ) {
+        setSyncStatus(
+          "Syncing..."
         );
 
-        alert(
-          `Failed to load habits: ${error.message}`
+        /*
+          Background synchronization.
+          The UI does not wait for this.
+        */
+        refreshFromServer(
+          user
         );
-      } finally {
-        setLoadingHabits(false);
+      } else {
+        setSyncStatus(
+          local.habits.length > 0
+            ? "Offline — saved locally"
+            : "Offline — no local data"
+        );
       }
     }
 
-    loadHabits();
+    initializeUser();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  /* =======================================================
+     SYNC WHEN CONNECTION RETURNS
+     ======================================================= */
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function handleReconnect() {
+      refreshFromServer(
+        user
+      );
+    }
+
+    window.addEventListener(
+      "online",
+      handleReconnect
+    );
+
+    return () => {
+      window.removeEventListener(
+        "online",
+        handleReconnect
+      );
+    };
   }, [user]);
 
   /* =======================================================
@@ -679,164 +1096,212 @@ function App() {
   }
 
   /* =======================================================
-     SAVE HABIT METADATA
+     SAVE HABIT
      ======================================================= */
 
-  async function saveHabit(habit) {
-    if (!user) return;
-
-    try {
-      const {
-        records,
-        ...habitData
-      } = habit;
-
-      await setDoc(
-        doc(
-          db,
-          "users",
-          user.uid,
-          "habits",
-          habit.id
-        ),
-        habitData,
-        {
-          merge: true,
-        }
-      );
-
-      setHabits((current) => {
-        const exists =
-          current.some(
-            (item) =>
-              item.id === habit.id
-          );
-
-        if (exists) {
-          return current.map(
-            (item) =>
-              item.id === habit.id
-                ? habit
-                : item
-          );
-        }
-
-        return [
-          ...current,
-          habit,
-        ];
-      });
-    } catch (error) {
-      console.error(
-        "Failed to save habit:",
-        error
-      );
-
-      alert(
-        `Failed to save habit: ${error.message}`
-      );
+  async function saveHabit(
+    habit
+  ) {
+    if (!user) {
+      return;
     }
+
+    const {
+      records,
+      ...habitData
+    } = habit;
+
+    /*
+      Update UI immediately.
+    */
+    setHabits((current) => {
+      const exists =
+        current.some(
+          (item) =>
+            item.id ===
+            habit.id
+        );
+
+      if (exists) {
+        return current.map(
+          (item) =>
+            item.id ===
+            habit.id
+              ? habit
+              : item
+        );
+      }
+
+      return [
+        ...current,
+        habit,
+      ];
+    });
+
+    /*
+      Do not await this.
+
+      Firestore persistence stores the
+      mutation locally immediately and
+      synchronizes it with the server
+      when the connection returns.
+    */
+    setDoc(
+      getHabitDocument(
+        user.uid,
+        habit.id
+      ),
+      habitData,
+      {
+        merge: true,
+      }
+    )
+      .then(() => {
+        setSyncStatus(
+          "Synced"
+        );
+      })
+      .catch((error) => {
+        console.error(
+          "Habit sync failed:",
+          error
+        );
+
+        if (
+          !navigator.onLine
+        ) {
+          setSyncStatus(
+            "Offline — saved locally"
+          );
+        } else {
+          setSyncStatus(
+            "Sync pending"
+          );
+        }
+      });
   }
 
   /* =======================================================
-     TOGGLE / SAVE TODAY'S RECORD
+     SAVE TODAY'S RECORD
      ======================================================= */
 
-  async function toggleToday(habit) {
-    if (!user) return;
+  async function toggleToday(
+    habit
+  ) {
+    if (!user) {
+      return;
+    }
 
-    try {
-      let value;
+    let value;
 
-      if (
-        habit.type === "boolean"
-      ) {
-        value =
-          !habit.records?.[today];
-      } else {
-        const current =
-          Number(
-            habit.records?.[today] ||
-              0
-          );
+    if (
+      habit.type ===
+      "boolean"
+    ) {
+      value =
+        !habit.records?.[
+          today
+        ];
+    } else {
+      const current =
+        Number(
+          habit.records?.[
+            today
+          ] || 0
+        );
 
-        const amount = prompt(
+      const amount =
+        prompt(
           `Enter today's amount in ${habit.unit}:`,
           current
         );
 
-        if (amount === null) {
-          return;
-        }
-
-        const numericAmount =
-          Number(amount);
-
-        if (
-          Number.isNaN(
-            numericAmount
-          ) ||
-          numericAmount < 0
-        ) {
-          alert(
-            "Please enter a valid number."
-          );
-
-          return;
-        }
-
-        value = numericAmount;
+      if (amount === null) {
+        return;
       }
 
-      await setDoc(
-        doc(
-          db,
-          "users",
-          user.uid,
-          "habits",
-          habit.id,
-          "records",
-          today
-        ),
-        {
-          value,
-        }
-      );
+      const numericAmount =
+        Number(amount);
 
-      setHabits((current) =>
-        current.map((item) => {
-          if (
-            item.id !== habit.id
-          ) {
-            return item;
-          }
+      if (
+        Number.isNaN(
+          numericAmount
+        ) ||
+        numericAmount < 0
+      ) {
+        alert(
+          "Please enter a valid number."
+        );
 
-          return {
-            ...item,
-            records: {
-              ...item.records,
-              [today]: value,
-            },
-          };
-        })
-      );
-    } catch (error) {
-      console.error(
-        "Failed to save today's record:",
-        error
-      );
+        return;
+      }
 
-      alert(
-        `Failed to save today's record: ${error.message}`
-      );
+      value =
+        numericAmount;
     }
+
+    /*
+      Update UI immediately.
+    */
+    setHabits((current) =>
+      current.map((item) => {
+        if (
+          item.id !==
+          habit.id
+        ) {
+          return item;
+        }
+
+        return {
+          ...item,
+          records: {
+            ...item.records,
+            [today]: value,
+          },
+        };
+      })
+    );
+
+    /*
+      Firestore handles offline
+      persistence and later sync.
+    */
+    setDoc(
+      getRecordDocument(
+        user.uid,
+        habit.id,
+        today
+      ),
+      {
+        value,
+      }
+    )
+      .then(() => {
+        setSyncStatus(
+          "Synced"
+        );
+      })
+      .catch((error) => {
+        console.error(
+          "Record sync failed:",
+          error
+        );
+
+        setSyncStatus(
+          navigator.onLine
+            ? "Sync pending"
+            : "Offline — saved locally"
+        );
+      });
   }
 
   /* =======================================================
      MOVE TO BIN
      ======================================================= */
 
-  async function moveToBin(id) {
+  async function moveToBin(
+    id
+  ) {
     if (
       !confirm(
         "Move this habit to the bin? Its data will be preserved."
@@ -845,11 +1310,15 @@ function App() {
       return;
     }
 
-    const habit = habits.find(
-      (item) => item.id === id
-    );
+    const habit =
+      habits.find(
+        (item) =>
+          item.id === id
+      );
 
-    if (!habit) return;
+    if (!habit) {
+      return;
+    }
 
     await saveHabit({
       ...habit,
@@ -863,12 +1332,18 @@ function App() {
      RESTORE
      ======================================================= */
 
-  async function restore(id) {
-    const habit = habits.find(
-      (item) => item.id === id
-    );
+  async function restore(
+    id
+  ) {
+    const habit =
+      habits.find(
+        (item) =>
+          item.id === id
+      );
 
-    if (!habit) return;
+    if (!habit) {
+      return;
+    }
 
     await saveHabit({
       ...habit,
@@ -881,7 +1356,9 @@ function App() {
      PERMANENT DELETE
      ======================================================= */
 
-  async function permanentlyDelete(id) {
+  async function permanentlyDelete(
+    id
+  ) {
     if (
       !confirm(
         "Permanently delete this habit and ALL of its data? This cannot be undone."
@@ -890,16 +1367,28 @@ function App() {
       return;
     }
 
+    /*
+      Permanent deletion is different from
+      ordinary offline writes.
+
+      We need to know every record document.
+      Therefore we require connectivity here
+      to avoid leaving unknown remote records.
+    */
+    if (!navigator.onLine) {
+      alert(
+        "Permanent deletion requires an internet connection. The habit can remain in the Bin until you are online."
+      );
+
+      return;
+    }
+
     try {
       const recordsSnapshot =
         await getDocs(
-          collection(
-            db,
-            "users",
+          getRecordsCollection(
             user.uid,
-            "habits",
-            id,
-            "records"
+            id
           )
         );
 
@@ -917,11 +1406,8 @@ function App() {
       await batch.commit();
 
       await deleteDoc(
-        doc(
-          db,
-          "users",
+        getHabitDocument(
           user.uid,
-          "habits",
           id
         )
       );
@@ -932,9 +1418,13 @@ function App() {
             habit.id !== id
         )
       );
+
+      setSyncStatus(
+        "Synced"
+      );
     } catch (error) {
       console.error(
-        "Failed to permanently delete habit:",
+        "Permanent deletion failed:",
         error
       );
 
@@ -948,7 +1438,9 @@ function App() {
      ADD HABIT
      ======================================================= */
 
-  async function addHabit(data) {
+  async function addHabit(
+    data
+  ) {
     const newHabit = {
       ...data,
       id: crypto.randomUUID(),
@@ -968,15 +1460,28 @@ function App() {
      UPDATE HABIT
      ======================================================= */
 
-  async function updateHabit(data) {
+  async function updateHabit(
+    data
+  ) {
     const existing =
       habits.find(
         (habit) =>
-          habit.id === data.id
+          habit.id ===
+          data.id
       );
 
-    if (!existing) return;
+    if (!existing) {
+      return;
+    }
 
+    /*
+      IMPORTANT:
+      The existing records are preserved.
+      Changing referenceAmount therefore
+      automatically changes the displayed
+      historical intensity without changing
+      the stored raw values.
+    */
     await saveHabit({
       ...existing,
       ...data,
@@ -1002,7 +1507,8 @@ function App() {
 
     if (
       target < 0 ||
-      target >= sorted.length
+      target >=
+        sorted.length
     ) {
       return;
     }
@@ -1032,14 +1538,16 @@ function App() {
   }
 
   /* =======================================================
-     INITIAL LOADING
+     INITIAL AUTH LOADING
      ======================================================= */
 
   if (user === undefined) {
     return (
       <div className="login-screen">
         <div className="login-card">
-          <p>Loading...</p>
+          <p>
+            Loading...
+          </p>
         </div>
       </div>
     );
@@ -1071,7 +1579,8 @@ function App() {
       )
       .sort(
         (a, b) =>
-          a.order - b.order
+          Number(a.order || 0) -
+          Number(b.order || 0)
       );
 
   const deletedHabits =
@@ -1096,8 +1605,10 @@ function App() {
             {new Date().toLocaleDateString(
               undefined,
               {
-                weekday: "long",
-                month: "long",
+                weekday:
+                  "long",
+                month:
+                  "long",
                 day: "numeric",
               }
             )}
@@ -1119,9 +1630,7 @@ function App() {
           >
             <span className="sync-dot" />
 
-            {isOnline
-              ? "Online"
-              : "Offline — changes saved locally"}
+            {syncStatus}
           </div>
         </div>
 
@@ -1146,7 +1655,9 @@ function App() {
             }
             title="Sign out"
           >
-            <LogOut size={18} />
+            <LogOut
+              size={18}
+            />
           </button>
         </div>
       </header>
@@ -1171,12 +1682,15 @@ function App() {
 
         <button
           className={
-            view === "statistics"
+            view ===
+            "statistics"
               ? "active"
               : ""
           }
           onClick={() =>
-            setView("statistics")
+            setView(
+              "statistics"
+            )
           }
         >
           <BarChart3
@@ -1196,7 +1710,9 @@ function App() {
             setView("bin")
           }
         >
-          <Archive size={18} />
+          <Archive
+            size={18}
+          />
 
           Bin
         </button>
@@ -1210,13 +1726,13 @@ function App() {
             </h2>
 
             <p>
-              Syncing your habits
-              with the cloud.
+              Loading local data...
             </p>
           </div>
         ) : (
           <>
-            {view === "habits" && (
+            {view ===
+              "habits" && (
               <section>
                 {activeHabits.length ===
                 0 ? (
@@ -1226,8 +1742,9 @@ function App() {
                     </h2>
 
                     <p>
-                      Create your first
-                      habit to get
+                      Create your
+                      first habit
+                      to get
                       started.
                     </p>
 
@@ -1379,7 +1896,8 @@ function App() {
                 {deletedHabits.length ===
                 0 ? (
                   <div className="empty-small">
-                    The bin is empty.
+                    The bin is
+                    empty.
                   </div>
                 ) : (
                   deletedHabits.map(
@@ -1434,7 +1952,8 @@ function App() {
                               size={16}
                             />
 
-                            Delete permanently
+                            Delete
+                            permanently
                           </button>
                         </div>
                       </div>
@@ -1455,7 +1974,9 @@ function App() {
           }
           onClose={() => {
             setShowAdd(false);
-            setEditingHabit(null);
+            setEditingHabit(
+              null
+            );
           }}
           onSave={
             editingHabit
@@ -1574,7 +2095,8 @@ function HabitModal({
           </select>
         </label>
 
-        {type === "numeric" && (
+        {type ===
+          "numeric" && (
           <>
             <label>
               Unit
@@ -1643,4 +2165,3 @@ function HabitModal({
 }
 
 export default App;
-```
