@@ -23,9 +23,11 @@ import {
 import {
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDocs,
   setDoc,
+  writeBatch,
 } from "firebase/firestore";
 
 import { auth, googleProvider, db } from "./firebase";
@@ -59,6 +61,109 @@ const initialHabits = [
   },
 ];
 
+/* =========================================================
+   FIRESTORE RECORD MIGRATION
+   ========================================================= */
+
+async function migrateLegacyRecords(
+  userId,
+  habitId,
+  records
+) {
+  const entries = Object.entries(records || {});
+
+  if (entries.length === 0) {
+    return;
+  }
+
+  const recordsPath = collection(
+    db,
+    "users",
+    userId,
+    "habits",
+    habitId,
+    "records"
+  );
+
+  // Firestore batches have a limit.
+  // 400 leaves room below the 500-operation limit.
+  const chunkSize = 400;
+
+  for (
+    let start = 0;
+    start < entries.length;
+    start += chunkSize
+  ) {
+    const chunk = entries.slice(
+      start,
+      start + chunkSize
+    );
+
+    const batch = writeBatch(db);
+
+    for (const [date, value] of chunk) {
+      const recordRef = doc(
+        recordsPath,
+        date
+      );
+
+      batch.set(recordRef, {
+        value,
+      });
+    }
+
+    await batch.commit();
+  }
+
+  // Remove the old embedded records only
+  // after all records were successfully copied.
+  await setDoc(
+    doc(
+      db,
+      "users",
+      userId,
+      "habits",
+      habitId
+    ),
+    {
+      records: deleteField(),
+    },
+    {
+      merge: true,
+    }
+  );
+}
+
+async function loadHabitRecords(
+  userId,
+  habitId
+) {
+  const recordsSnapshot = await getDocs(
+    collection(
+      db,
+      "users",
+      userId,
+      "habits",
+      habitId,
+      "records"
+    )
+  );
+
+  const records = {};
+
+  recordsSnapshot.forEach((recordDoc) => {
+    const data = recordDoc.data();
+
+    records[recordDoc.id] = data.value;
+  });
+
+  return records;
+}
+
+/* =========================================================
+   HABIT HELPERS
+   ========================================================= */
+
 function intensity(value, reference) {
   if (!value || !reference) return 0;
 
@@ -78,22 +183,29 @@ function getStreak(habit) {
 
   while (true) {
     const key = date.toISOString().slice(0, 10);
-    const value = habit.records[key];
+    const value = habit.records?.[key];
 
     const successful =
       habit.type === "boolean"
         ? value === true
-        : Number(value || 0) >= habit.referenceAmount;
+        : Number(value || 0) >=
+          habit.referenceAmount;
 
     if (!successful) break;
 
     streak++;
 
-    date.setDate(date.getDate() - 1);
+    date.setDate(
+      date.getDate() - 1
+    );
   }
 
   return streak;
 }
+
+/* =========================================================
+   CALENDAR
+   ========================================================= */
 
 function Calendar({ habit }) {
   const days = useMemo(() => {
@@ -102,7 +214,11 @@ function Calendar({ habit }) {
 
     for (let i = 89; i >= 0; i--) {
       const date = new Date(now);
-      date.setDate(now.getDate() - i);
+
+      date.setDate(
+        now.getDate() - i
+      );
+
       result.push(date);
     }
 
@@ -113,15 +229,21 @@ function Calendar({ habit }) {
     <div className="calendar-wrapper">
       <div className="calendar">
         {days.map((date) => {
-          const key = date.toISOString().slice(0, 10);
-          const value = habit.records[key];
+          const key =
+            date.toISOString().slice(0, 10);
+
+          const value =
+            habit.records?.[key];
 
           let level = 0;
 
           if (habit.type === "boolean") {
             level = value ? 4 : 0;
           } else {
-            level = intensity(value, habit.referenceAmount);
+            level = intensity(
+              value,
+              habit.referenceAmount
+            );
           }
 
           return (
@@ -143,27 +265,37 @@ function Calendar({ habit }) {
   );
 }
 
+/* =========================================================
+   HABIT CARD
+   ========================================================= */
+
 function HabitCard({
   habit,
   onToggleToday,
   onDelete,
   onEdit,
 }) {
-  const todayValue = habit.records[today];
+  const todayValue =
+    habit.records?.[today];
+
   const streak = getStreak(habit);
 
   return (
     <div className="habit-card">
       <div className="habit-header">
         <div className="habit-title-area">
-          <GripVertical className="drag-icon" size={19} />
+          <GripVertical
+            className="drag-icon"
+            size={19}
+          />
 
           <div>
             <h2>{habit.name}</h2>
 
             {habit.type === "numeric" ? (
               <p>
-                Reference: {habit.referenceAmount}{" "}
+                Reference:{" "}
+                {habit.referenceAmount}{" "}
                 {habit.unit}
               </p>
             ) : (
@@ -173,11 +305,21 @@ function HabitCard({
         </div>
 
         <div className="habit-actions">
-          <button onClick={() => onEdit(habit)}>
+          <button
+            onClick={() =>
+              onEdit(habit)
+            }
+            title="Edit"
+          >
             <Settings size={17} />
           </button>
 
-          <button onClick={() => onDelete(habit)}>
+          <button
+            onClick={() =>
+              onDelete(habit)
+            }
+            title="Move to bin"
+          >
             <Trash2 size={17} />
           </button>
         </div>
@@ -188,27 +330,39 @@ function HabitCard({
       <div className="habit-footer">
         <div className="streak">
           <Flame size={17} />
-          <strong>{streak}</strong>
-          <span>day streak</span>
+
+          <strong>
+            {streak}
+          </strong>
+
+          <span>
+            day streak
+          </span>
         </div>
 
         <button
           className="today-button"
-          onClick={() => onToggleToday(habit)}
+          onClick={() =>
+            onToggleToday(habit)
+          }
         >
           {habit.type === "boolean" ? (
             todayValue ? (
               <>
-                <Check size={17} /> Done
+                <Check size={17} />
+                Done
               </>
             ) : (
               <>
-                <X size={17} /> Mark done
+                <X size={17} />
+                Mark done
               </>
             )
           ) : (
             <>
-              Today: {todayValue || 0} {habit.unit}
+              Today:{" "}
+              {todayValue || 0}{" "}
+              {habit.unit}
             </>
           )}
         </button>
@@ -216,6 +370,10 @@ function HabitCard({
     </div>
   );
 }
+
+/* =========================================================
+   LOGIN SCREEN
+   ========================================================= */
 
 function LoginScreen({ onLogin }) {
   return (
@@ -228,8 +386,8 @@ function LoginScreen({ onLogin }) {
         <h1>Habit Tracker</h1>
 
         <p>
-          Track your habits, build consistency, and see
-          your progress.
+          Track your habits, build consistency,
+          and see your progress.
         </p>
 
         <button
@@ -243,25 +401,48 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function App() {
-  const [user, setUser] = useState(undefined);
-  const [habits, setHabits] = useState([]);
-  const [loadingHabits, setLoadingHabits] = useState(false);
+/* =========================================================
+   MAIN APP
+   ========================================================= */
 
-  const [view, setView] = useState("habits");
-  const [showAdd, setShowAdd] = useState(false);
-  const [editingHabit, setEditingHabit] = useState(null);
+function App() {
+  const [user, setUser] =
+    useState(undefined);
+
+  const [habits, setHabits] =
+    useState([]);
+
+  const [loadingHabits, setLoadingHabits] =
+    useState(false);
+
+  const [view, setView] =
+    useState("habits");
+
+  const [showAdd, setShowAdd] =
+    useState(false);
+
+  const [editingHabit, setEditingHabit] =
+    useState(null);
+
+  /* -------------------------------------------------------
+     AUTH STATE
+     ------------------------------------------------------- */
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      (currentUser) => {
-        setUser(currentUser);
-      }
-    );
+    const unsubscribe =
+      onAuthStateChanged(
+        auth,
+        (currentUser) => {
+          setUser(currentUser);
+        }
+      );
 
     return unsubscribe;
   }, []);
+
+  /* -------------------------------------------------------
+     LOAD HABITS + MIGRATE OLD RECORDS
+     ------------------------------------------------------- */
 
   useEffect(() => {
     async function loadHabits() {
@@ -273,45 +454,129 @@ function App() {
       try {
         setLoadingHabits(true);
 
-        const habitsRef = collection(
-          db,
-          "users",
-          user.uid,
-          "habits"
-        );
-
-        const snapshot = await getDocs(habitsRef);
-
-        if (snapshot.empty) {
-          const seededHabits = initialHabits.map(
-            (habit) => ({
-              ...habit,
-              records: { ...habit.records },
-            })
+        const habitsRef =
+          collection(
+            db,
+            "users",
+            user.uid,
+            "habits"
           );
 
-          for (const habit of seededHabits) {
-            await setDoc(
+        const snapshot =
+          await getDocs(habitsRef);
+
+        /* -------------------------------------------------
+           NEW USER
+           ------------------------------------------------- */
+
+        if (snapshot.empty) {
+          const seededHabits =
+            initialHabits.map(
+              (habit) => ({
+                ...habit,
+                records: {},
+              })
+            );
+
+          for (
+            let i = 0;
+            i < initialHabits.length;
+            i++
+          ) {
+            const habit =
+              initialHabits[i];
+
+            const habitRef =
               doc(
                 db,
                 "users",
                 user.uid,
                 "habits",
                 habit.id
-              ),
-              habit
+              );
+
+            const {
+              records,
+              ...habitData
+            } = habit;
+
+            // Store habit metadata.
+            await setDoc(
+              habitRef,
+              habitData
+            );
+
+            // Store daily records
+            // separately.
+            await migrateLegacyRecords(
+              user.uid,
+              habit.id,
+              records
+            );
+
+            seededHabits[i] = {
+              ...habitData,
+              records: {
+                ...records,
+              },
+            };
+          }
+
+          setHabits(
+            seededHabits
+          );
+
+          return;
+        }
+
+        /* -------------------------------------------------
+           EXISTING USER
+           ------------------------------------------------- */
+
+        const loadedHabits = [];
+
+        for (
+          const item of snapshot.docs
+        ) {
+          const data =
+            item.data();
+
+          /*
+           * If the old records object exists,
+           * migrate it to the subcollection.
+           */
+          if (
+            data.records &&
+            typeof data.records ===
+              "object"
+          ) {
+            await migrateLegacyRecords(
+              user.uid,
+              item.id,
+              data.records
             );
           }
 
-          setHabits(seededHabits);
-        } else {
-          const loaded = snapshot.docs.map((item) => ({
-            id: item.id,
-            ...item.data(),
-          }));
+          /*
+           * Always read daily records
+           * from the new subcollection.
+           */
+          const records =
+            await loadHabitRecords(
+              user.uid,
+              item.id
+            );
 
-          setHabits(loaded);
+          loadedHabits.push({
+            id: item.id,
+            ...data,
+            records,
+          });
         }
+
+        setHabits(
+          loadedHabits
+        );
       } catch (error) {
         console.error(
           "Failed to load habits:",
@@ -329,9 +594,16 @@ function App() {
     loadHabits();
   }, [user]);
 
+  /* -------------------------------------------------------
+     GOOGLE LOGIN
+     ------------------------------------------------------- */
+
   async function handleGoogleLogin() {
     try {
-      await signInWithPopup(auth, googleProvider);
+      await signInWithPopup(
+        auth,
+        googleProvider
+      );
     } catch (error) {
       console.error(
         "Google login failed:",
@@ -343,6 +615,10 @@ function App() {
       );
     }
   }
+
+  /* -------------------------------------------------------
+     LOGOUT
+     ------------------------------------------------------- */
 
   async function handleLogout() {
     try {
@@ -359,10 +635,19 @@ function App() {
     }
   }
 
+  /* -------------------------------------------------------
+     SAVE HABIT METADATA
+     ------------------------------------------------------- */
+
   async function saveHabit(habit) {
     if (!user) return;
 
     try {
+      const {
+        records,
+        ...habitData
+      } = habit;
+
       await setDoc(
         doc(
           db,
@@ -371,23 +656,34 @@ function App() {
           "habits",
           habit.id
         ),
-        habit
+        habitData,
+        {
+          merge: true,
+        }
       );
 
       setHabits((current) => {
-        const exists = current.some(
-          (item) => item.id === habit.id
-        );
+        const exists =
+          current.some(
+            (item) =>
+              item.id ===
+              habit.id
+          );
 
         if (exists) {
-          return current.map((item) =>
-            item.id === habit.id
-              ? habit
-              : item
+          return current.map(
+            (item) =>
+              item.id ===
+              habit.id
+                ? habit
+                : item
           );
         }
 
-        return [...current, habit];
+        return [
+          ...current,
+          habit,
+        ];
       });
     } catch (error) {
       console.error(
@@ -401,44 +697,124 @@ function App() {
     }
   }
 
+  /* -------------------------------------------------------
+     TOGGLE / SAVE TODAY'S RECORD
+     ------------------------------------------------------- */
+
   async function toggleToday(habit) {
-    const updated = {
-      ...habit,
-      records: {
-        ...habit.records,
-      },
-    };
+    if (!user) return;
 
-    if (habit.type === "boolean") {
-      updated.records[today] =
-        !updated.records[today];
-    } else {
-      const current = Number(
-        updated.records[today] || 0
-      );
-
-      const amount = prompt(
-        `Enter today's amount in ${habit.unit}:`,
-        current
-      );
-
-      if (amount === null) return;
-
-      const numericAmount = Number(amount);
+    try {
+      let value;
 
       if (
-        Number.isNaN(numericAmount) ||
-        numericAmount < 0
+        habit.type ===
+        "boolean"
       ) {
-        alert("Please enter a valid number.");
-        return;
+        value =
+          !habit.records?.[
+            today
+          ];
+      } else {
+        const current =
+          Number(
+            habit.records?.[
+              today
+            ] || 0
+          );
+
+        const amount =
+          prompt(
+            `Enter today's amount in ${habit.unit}:`,
+            current
+          );
+
+        if (
+          amount === null
+        ) {
+          return;
+        }
+
+        const numericAmount =
+          Number(amount);
+
+        if (
+          Number.isNaN(
+            numericAmount
+          ) ||
+          numericAmount < 0
+        ) {
+          alert(
+            "Please enter a valid number."
+          );
+
+          return;
+        }
+
+        value =
+          numericAmount;
       }
 
-      updated.records[today] = numericAmount;
-    }
+      /* -----------------------------------------------
+         WRITE INDIVIDUAL RECORD DOCUMENT
+         ----------------------------------------------- */
 
-    await saveHabit(updated);
+      await setDoc(
+        doc(
+          db,
+          "users",
+          user.uid,
+          "habits",
+          habit.id,
+          "records",
+          today
+        ),
+        {
+          value,
+        }
+      );
+
+      /* -----------------------------------------------
+         UPDATE UI IMMEDIATELY
+         ----------------------------------------------- */
+
+      setHabits(
+        (current) =>
+          current.map(
+            (item) => {
+              if (
+                item.id !==
+                habit.id
+              ) {
+                return item;
+              }
+
+              return {
+                ...item,
+                records: {
+                  ...item.records,
+                  [today]:
+                    value,
+                },
+              };
+            }
+          )
+      );
+    } catch (error) {
+      console.error(
+        "Failed to save today's record:",
+        error
+      );
+
+      alert(
+        `Failed to save today's record: ${error.message}`
+      );
+    }
   }
+
+  /* -------------------------------------------------------
+     MOVE TO BIN
+     ------------------------------------------------------- */
 
   async function moveToBin(id) {
     if (
@@ -449,23 +825,32 @@ function App() {
       return;
     }
 
-    const habit = habits.find(
-      (item) => item.id === id
-    );
+    const habit =
+      habits.find(
+        (item) =>
+          item.id === id
+      );
 
     if (!habit) return;
 
     await saveHabit({
       ...habit,
       deleted: true,
-      deletedAt: new Date().toISOString(),
+      deletedAt:
+        new Date().toISOString(),
     });
   }
 
+  /* -------------------------------------------------------
+     RESTORE
+     ------------------------------------------------------- */
+
   async function restore(id) {
-    const habit = habits.find(
-      (item) => item.id === id
-    );
+    const habit =
+      habits.find(
+        (item) =>
+          item.id === id
+      );
 
     if (!habit) return;
 
@@ -476,7 +861,13 @@ function App() {
     });
   }
 
-  async function permanentlyDelete(id) {
+  /* -------------------------------------------------------
+     PERMANENT DELETE
+     ------------------------------------------------------- */
+
+  async function permanentlyDelete(
+    id
+  ) {
     if (
       !confirm(
         "Permanently delete this habit and ALL of its data? This cannot be undone."
@@ -486,6 +877,37 @@ function App() {
     }
 
     try {
+      /*
+       * Delete all record documents first.
+       */
+      const recordsSnapshot =
+        await getDocs(
+          collection(
+            db,
+            "users",
+            user.uid,
+            "habits",
+            id,
+            "records"
+          )
+        );
+
+      const batch =
+        writeBatch(db);
+
+      recordsSnapshot.forEach(
+        (recordDoc) => {
+          batch.delete(
+            recordDoc.ref
+          );
+        }
+      );
+
+      await batch.commit();
+
+      /*
+       * Then delete the habit itself.
+       */
       await deleteDoc(
         doc(
           db,
@@ -496,10 +918,12 @@ function App() {
         )
       );
 
-      setHabits((current) =>
-        current.filter(
-          (habit) => habit.id !== id
-        )
+      setHabits(
+        (current) =>
+          current.filter(
+            (habit) =>
+              habit.id !== id
+          )
       );
     } catch (error) {
       console.error(
@@ -513,6 +937,10 @@ function App() {
     }
   }
 
+  /* -------------------------------------------------------
+     ADD HABIT
+     ------------------------------------------------------- */
+
   async function addHabit(data) {
     const newHabit = {
       ...data,
@@ -522,14 +950,24 @@ function App() {
       records: {},
     };
 
-    await saveHabit(newHabit);
+    await saveHabit(
+      newHabit
+    );
+
     setShowAdd(false);
   }
 
+  /* -------------------------------------------------------
+     UPDATE HABIT
+     ------------------------------------------------------- */
+
   async function updateHabit(data) {
-    const existing = habits.find(
-      (habit) => habit.id === data.id
-    );
+    const existing =
+      habits.find(
+        (habit) =>
+          habit.id ===
+          data.id
+      );
 
     if (!existing) return;
 
@@ -538,17 +976,30 @@ function App() {
       ...data,
     });
 
-    setEditingHabit(null);
+    setEditingHabit(
+      null
+    );
   }
 
-  async function moveHabit(index, direction) {
-    const sorted = [...activeHabits];
+  /* -------------------------------------------------------
+     MOVE HABIT UP / DOWN
+     ------------------------------------------------------- */
 
-    const target = index + direction;
+  async function moveHabit(
+    index,
+    direction
+  ) {
+    const sorted = [
+      ...activeHabits,
+    ];
+
+    const target =
+      index + direction;
 
     if (
       target < 0 ||
-      target >= sorted.length
+      target >=
+        sorted.length
     ) {
       return;
     }
@@ -561,76 +1012,127 @@ function App() {
       sorted[index],
     ];
 
-    for (let i = 0; i < sorted.length; i++) {
+    /*
+     * Update all affected ordering values.
+     */
+    for (
+      let i = 0;
+      i < sorted.length;
+      i++
+    ) {
       const updated = {
         ...sorted[i],
         order: i,
       };
 
-      await saveHabit(updated);
+      await saveHabit(
+        updated
+      );
     }
   }
+
+  /* -------------------------------------------------------
+     LOADING
+     ------------------------------------------------------- */
 
   if (user === undefined) {
     return (
       <div className="login-screen">
         <div className="login-card">
-          <p>Loading...</p>
+          <p>
+            Loading...
+          </p>
         </div>
       </div>
     );
   }
 
+  /* -------------------------------------------------------
+     NOT LOGGED IN
+     ------------------------------------------------------- */
+
   if (!user) {
     return (
       <LoginScreen
-        onLogin={handleGoogleLogin}
+        onLogin={
+          handleGoogleLogin
+        }
       />
     );
   }
 
-  const activeHabits = habits
-    .filter((habit) => !habit.deleted)
-    .sort((a, b) => a.order - b.order);
+  /* -------------------------------------------------------
+     SORT HABITS
+     ------------------------------------------------------- */
 
-  const deletedHabits = habits.filter(
-    (habit) => habit.deleted
-  );
+  const activeHabits =
+    habits
+      .filter(
+        (habit) =>
+          !habit.deleted
+      )
+      .sort(
+        (a, b) =>
+          a.order - b.order
+      );
+
+  const deletedHabits =
+    habits.filter(
+      (habit) =>
+        habit.deleted
+    );
+
+  /* -------------------------------------------------------
+     MAIN UI
+     ------------------------------------------------------- */
 
   return (
     <div className="app">
       <header className="topbar">
         <div>
-          <h1>Habit Tracker</h1>
+          <h1>
+            Habit Tracker
+          </h1>
 
           <p>
             {new Date().toLocaleDateString(
               undefined,
               {
-                weekday: "long",
-                month: "long",
+                weekday:
+                  "long",
+                month:
+                  "long",
                 day: "numeric",
               }
             )}
           </p>
 
           <small>
-            {user.displayName || user.email}
+            {user.displayName ||
+              user.email}
           </small>
         </div>
 
         <div className="topbar-actions">
           <button
             className="add-button"
-            onClick={() => setShowAdd(true)}
+            onClick={() =>
+              setShowAdd(true)
+            }
           >
             <Plus size={20} />
-            <span>Add Habit</span>
+
+            <span>
+              Add Habit
+            </span>
           </button>
 
           <button
             className="logout-button"
-            onClick={handleLogout}
+            onClick={
+              handleLogout
+            }
+            title="Sign out"
           >
             <LogOut size={18} />
           </button>
@@ -645,24 +1147,35 @@ function App() {
               : ""
           }
           onClick={() =>
-            setView("habits")
+            setView(
+              "habits"
+            )
           }
         >
-          <CalendarDays size={18} />
+          <CalendarDays
+            size={18}
+          />
+
           Habits
         </button>
 
         <button
           className={
-            view === "statistics"
+            view ===
+            "statistics"
               ? "active"
               : ""
           }
           onClick={() =>
-            setView("statistics")
+            setView(
+              "statistics"
+            )
           }
         >
-          <BarChart3 size={18} />
+          <BarChart3
+            size={18}
+          />
+
           Statistics
         </button>
 
@@ -677,6 +1190,7 @@ function App() {
           }
         >
           <Archive size={18} />
+
           Bin
         </button>
       </nav>
@@ -684,42 +1198,66 @@ function App() {
       <main>
         {loadingHabits ? (
           <div className="empty">
-            <h2>Loading habits...</h2>
+            <h2>
+              Loading habits...
+            </h2>
+
             <p>
-              Syncing your habits with the cloud.
+              Syncing your habits
+              with the cloud.
             </p>
           </div>
         ) : (
           <>
+            {/* -----------------------------------------
+                HABITS VIEW
+                ----------------------------------------- */}
+
             {view === "habits" && (
               <section>
-                {activeHabits.length === 0 ? (
+                {activeHabits.length ===
+                0 ? (
                   <div className="empty">
-                    <h2>No habits yet</h2>
+                    <h2>
+                      No habits yet
+                    </h2>
 
                     <p>
-                      Create your first habit
-                      to get started.
+                      Create your first
+                      habit to get
+                      started.
                     </p>
 
                     <button
                       onClick={() =>
-                        setShowAdd(true)
+                        setShowAdd(
+                          true
+                        )
                       }
                     >
-                      <Plus size={18} />
+                      <Plus
+                        size={18}
+                      />
+
                       Add Habit
                     </button>
                   </div>
                 ) : (
                   activeHabits.map(
-                    (habit, index) => (
+                    (
+                      habit,
+                      index
+                    ) => (
                       <div
                         className="sortable"
-                        key={habit.id}
+                        key={
+                          habit.id
+                        }
                       >
                         <HabitCard
-                          habit={habit}
+                          habit={
+                            habit
+                          }
                           onToggleToday={
                             toggleToday
                           }
@@ -734,7 +1272,8 @@ function App() {
                         <div className="move-controls">
                           <button
                             disabled={
-                              index === 0
+                              index ===
+                              0
                             }
                             onClick={() =>
                               moveHabit(
@@ -769,15 +1308,23 @@ function App() {
               </section>
             )}
 
-            {view === "statistics" && (
+            {/* -----------------------------------------
+                STATISTICS
+                ----------------------------------------- */}
+
+            {view ===
+              "statistics" && (
               <section className="panel">
-                <h2>Statistics</h2>
+                <h2>
+                  Statistics
+                </h2>
 
                 {activeHabits.map(
                   (habit) => {
                     const values =
                       Object.values(
-                        habit.records || {}
+                        habit.records ||
+                          {}
                       );
 
                     const total =
@@ -787,10 +1334,14 @@ function App() {
                             Boolean
                           ).length
                         : values.reduce(
-                            (a, b) =>
+                            (
+                              a,
+                              b
+                            ) =>
                               a +
                               Number(
-                                b || 0
+                                b ||
+                                  0
                               ),
                             0
                           );
@@ -798,10 +1349,14 @@ function App() {
                     return (
                       <div
                         className="stat-row"
-                        key={habit.id}
+                        key={
+                          habit.id
+                        }
                       >
                         <strong>
-                          {habit.name}
+                          {
+                            habit.name
+                          }
                         </strong>
 
                         <span>
@@ -817,25 +1372,37 @@ function App() {
               </section>
             )}
 
-            {view === "bin" && (
+            {/* -----------------------------------------
+                BIN
+                ----------------------------------------- */}
+
+            {view ===
+              "bin" && (
               <section className="panel">
-                <h2>Bin</h2>
+                <h2>
+                  Bin
+                </h2>
 
                 {deletedHabits.length ===
                 0 ? (
                   <div className="empty-small">
-                    The bin is empty.
+                    The bin is
+                    empty.
                   </div>
                 ) : (
                   deletedHabits.map(
                     (habit) => (
                       <div
                         className="bin-row"
-                        key={habit.id}
+                        key={
+                          habit.id
+                        }
                       >
                         <div>
                           <strong>
-                            {habit.name}
+                            {
+                              habit.name
+                            }
                           </strong>
 
                           <small>
@@ -857,8 +1424,11 @@ function App() {
                             }
                           >
                             <RotateCcw
-                              size={16}
+                              size={
+                                16
+                              }
                             />
+
                             Restore
                           </button>
 
@@ -871,9 +1441,13 @@ function App() {
                             }
                           >
                             <Trash2
-                              size={16}
+                              size={
+                                16
+                              }
                             />
-                            Delete permanently
+
+                            Delete
+                            permanently
                           </button>
                         </div>
                       </div>
@@ -886,13 +1460,24 @@ function App() {
         )}
       </main>
 
+      {/* ---------------------------------------------
+          ADD / EDIT MODAL
+          --------------------------------------------- */}
+
       {(showAdd ||
         editingHabit) && (
         <HabitModal
-          habit={editingHabit}
+          habit={
+            editingHabit
+          }
           onClose={() => {
-            setShowAdd(false);
-            setEditingHabit(null);
+            setShowAdd(
+              false
+            );
+
+            setEditingHabit(
+              null
+            );
           }}
           onSave={
             editingHabit
@@ -905,43 +1490,59 @@ function App() {
   );
 }
 
+/* =========================================================
+   HABIT MODAL
+   ========================================================= */
+
 function HabitModal({
   habit,
   onClose,
   onSave,
 }) {
-  const [name, setName] = useState(
-    habit?.name || ""
-  );
-
-  const [type, setType] = useState(
-    habit?.type || "numeric"
-  );
-
-  const [unit, setUnit] = useState(
-    habit?.unit || "hours"
-  );
-
-  const [referenceAmount, setReferenceAmount] =
+  const [name, setName] =
     useState(
-      habit?.referenceAmount || 1
+      habit?.name || ""
     );
+
+  const [type, setType] =
+    useState(
+      habit?.type ||
+        "numeric"
+    );
+
+  const [unit, setUnit] =
+    useState(
+      habit?.unit ||
+        "hours"
+    );
+
+  const [
+    referenceAmount,
+    setReferenceAmount,
+  ] = useState(
+    habit?.referenceAmount ||
+      1
+  );
 
   function submit(e) {
     e.preventDefault();
 
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      return;
+    }
 
     onSave({
       ...(habit || {}),
       name: name.trim(),
       type,
       unit:
-        type === "numeric"
+        type ===
+        "numeric"
           ? unit
           : "",
       referenceAmount:
-        type === "numeric"
+        type ===
+        "numeric"
           ? Number(
               referenceAmount
             )
@@ -953,7 +1554,9 @@ function HabitModal({
     <div className="modal-backdrop">
       <form
         className="modal"
-        onSubmit={submit}
+        onSubmit={
+          submit
+        }
       >
         <h2>
           {habit
@@ -997,14 +1600,17 @@ function HabitModal({
           </select>
         </label>
 
-        {type === "numeric" && (
+        {type ===
+          "numeric" && (
           <>
             <label>
               Unit
 
               <input
                 value={unit}
-                onChange={(e) =>
+                onChange={(
+                  e
+                ) =>
                   setUnit(
                     e.target.value
                   )
@@ -1023,7 +1629,9 @@ function HabitModal({
                 value={
                   referenceAmount
                 }
-                onChange={(e) =>
+                onChange={(
+                  e
+                ) =>
                   setReferenceAmount(
                     e.target.value
                   )
@@ -1033,11 +1641,16 @@ function HabitModal({
 
             {habit && (
               <p className="modal-note">
-                Changing the
-                reference will
-                recalculate the
-                intensity of all
-                historical days.
+                Changing
+                the
+                reference
+                will
+                recalculate
+                the
+                intensity
+                of all
+                historical
+                days.
               </p>
             )}
           </>
@@ -1046,7 +1659,9 @@ function HabitModal({
         <div className="modal-actions">
           <button
             type="button"
-            onClick={onClose}
+            onClick={
+              onClose
+            }
           >
             Cancel
           </button>
