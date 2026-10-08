@@ -409,6 +409,9 @@ function App() {
   const [user, setUser] =
     useState(undefined);
 
+  const [isOnline, setIsOnline] =
+    useState(navigator.onLine);
+
   const [habits, setHabits] =
     useState([]);
 
@@ -428,17 +431,41 @@ function App() {
      AUTH STATE
      ------------------------------------------------------- */
 
-  useEffect(() => {
-    const unsubscribe =
-      onAuthStateChanged(
-        auth,
-        (currentUser) => {
-          setUser(currentUser);
-        }
-      );
+ /* -------------------------------------------------------
+   ONLINE / OFFLINE STATUS
+   ------------------------------------------------------- */
 
-    return unsubscribe;
-  }, []);
+useEffect(() => {
+  function handleOnline() {
+    setIsOnline(true);
+  }
+
+  function handleOffline() {
+    setIsOnline(false);
+  }
+
+  window.addEventListener(
+    "online",
+    handleOnline
+  );
+
+  window.addEventListener(
+    "offline",
+    handleOffline
+  );
+
+  return () => {
+    window.removeEventListener(
+      "online",
+      handleOnline
+    );
+
+    window.removeEventListener(
+      "offline",
+      handleOffline
+    );
+  };
+}, []);
 
   /* -------------------------------------------------------
      LOAD HABITS + MIGRATE OLD RECORDS
@@ -1112,7 +1139,21 @@ function App() {
               user.email}
           </small>
         </div>
+        <div className="sync-status-container">
+  <div
+    className={`sync-status ${
+      isOnline
+        ? "online"
+        : "offline"
+    }`}
+  >
+    <span className="sync-dot" />
 
+    {isOnline
+      ? "Online"
+      : "Offline — changes saved locally"}
+  </div>
+</div>
         <div className="topbar-actions">
           <button
             className="add-button"
