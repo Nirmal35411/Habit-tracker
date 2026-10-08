@@ -333,11 +333,48 @@ function scoreCellStyle(score) {
   };
 }
 
+function buildMonthList(firstKey, today) {
+  const start = parseDateKey(firstKey);
+  const end = parseDateKey(today);
+
+  const list = [];
+
+  let year = end.getFullYear();
+  let month = end.getMonth();
+
+  const startYear = start.getFullYear();
+  const startMonth = start.getMonth();
+
+  while (
+    year > startYear ||
+    (year === startYear && month >= startMonth)
+  ) {
+    list.push({ year, month });
+
+    month -= 1;
+
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+
+    if (list.length > 1200) break;
+  }
+
+  return list;
+}
+
+/*
+ * One month of the calendar.
+ * getCell(key) returns null/undefined for "nothing", or:
+ *   { intensity: 0-100, main: "text shown in the box", title }
+ * A cell without `intensity` is drawn as an empty (no data) box.
+ */
 function MonthCalendar({
   year,
   month,
-  scores,
   today,
+  getCell,
 }) {
   const label = new Date(year, month, 1).toLocaleDateString(
     undefined,
@@ -362,58 +399,115 @@ function MonthCalendar({
   }
 
   return (
-    <div className="ds-month">
-      <h3 className="ds-month-title">{label}</h3>
+    <div className="dt-month">
+      <h3 className="dt-month-title">{label}</h3>
 
-      <div className="ds-weekdays">
+      <div className="dt-weekdays">
         {WEEKDAY_LABELS.map((name) => (
           <span key={name}>{name}</span>
         ))}
       </div>
 
-      <div className="ds-grid">
+      <div className="dt-grid">
         {cells.map((cell) => {
           if (cell.pad) {
             return (
               <div
                 key={cell.key}
-                className="ds-cell ds-pad"
+                className="dt-cell dt-pad"
               />
             );
           }
 
-          const score = scores[cell.key];
-          const hasScore = score !== undefined;
+          const info = getCell(cell.key);
+          const hasData =
+            info && info.intensity !== undefined;
           const future = cell.key > today;
 
           return (
             <div
               key={cell.key}
-              className={`ds-cell ${
-                hasScore ? "ds-scored" : "ds-empty"
-              } ${future ? "ds-future" : ""} ${
-                cell.key === today ? "ds-today" : ""
+              className={`dt-cell ${
+                hasData ? "dt-scored" : "dt-empty"
+              } ${future ? "dt-future" : ""} ${
+                cell.key === today ? "dt-today" : ""
               }`}
               style={
-                hasScore ? scoreCellStyle(score) : undefined
+                hasData
+                  ? scoreCellStyle(info.intensity)
+                  : undefined
               }
-              title={`${formatLongDate(cell.key)} — ${
-                hasScore
-                  ? `${formatScore(score)}%`
-                  : "No score"
-              }`}
+              title={
+                info?.title || formatLongDate(cell.key)
+              }
             >
-              <span className="ds-day-num">{cell.day}</span>
+              <span className="dt-day-num">{cell.day}</span>
 
-              {hasScore && (
-                <span className="ds-day-score">
-                  {Math.round(score)}
-                </span>
-              )}
+              {hasData &&
+                info.main !== undefined &&
+                info.main !== "" && (
+                  <span className="dt-day-val">
+                    {info.main}
+                  </span>
+                )}
             </div>
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function CalendarLegend() {
+  return (
+    <div className="dt-legend">
+      <span>0%</span>
+      <span className="dt-legend-bar" />
+      <span>100%</span>
+      <span className="dt-legend-none" />
+      <span>No data</span>
+    </div>
+  );
+}
+
+function CalendarSection({ months, today, getCell }) {
+  return (
+    <section className="dt-calendar">
+      <div className="section-heading">
+        <div>
+          <div className="eyebrow">Calendar</div>
+
+          <h2>Every day, month by month</h2>
+        </div>
+
+        <CalendarLegend />
+      </div>
+
+      <div className="dt-months">
+        {months.map(({ year, month }) => (
+          <MonthCalendar
+            key={`${year}-${month}`}
+            year={year}
+            month={month}
+            today={today}
+            getCell={getCell}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Tile({ label, value, hint, primary = false }) {
+  return (
+    <div
+      className={`dt-tile ${primary ? "dt-tile-primary" : ""}`}
+    >
+      <div className="dt-tile-label">{label}</div>
+
+      <div className="dt-tile-value">{value}</div>
+
+      {hint ? <div className="dt-tile-hint">{hint}</div> : null}
     </div>
   );
 }
@@ -465,39 +559,31 @@ function DayScoreDetails({ scores, today, onBack }) {
     };
   }, [fromInput, toInput, firstKey, today, scoredKeys, scores]);
 
-  const months = useMemo(() => {
-    const start = parseDateKey(firstKey);
-    const end = parseDateKey(today);
+  const months = useMemo(
+    () => buildMonthList(firstKey, today),
+    [firstKey, today]
+  );
 
-    const list = [];
+  const getCell = (key) => {
+    const score = scores[key];
 
-    let year = end.getFullYear();
-    let month = end.getMonth();
-
-    const startYear = start.getFullYear();
-    const startMonth = start.getMonth();
-
-    while (
-      year > startYear ||
-      (year === startYear && month >= startMonth)
-    ) {
-      list.push({ year, month });
-
-      month -= 1;
-
-      if (month < 0) {
-        month = 11;
-        year -= 1;
-      }
-
-      if (list.length > 1200) break;
+    if (score === undefined) {
+      return {
+        title: `${formatLongDate(key)} — No score`,
+      };
     }
 
-    return list;
-  }, [firstKey, today]);
+    return {
+      intensity: score,
+      main: Math.round(score),
+      title: `${formatLongDate(key)} — ${formatScore(
+        score
+      )}%`,
+    };
+  };
 
   return (
-    <div className="details-page">
+    <div className="details-page dt-page">
       <div className="details-header">
         <button className="back-button" onClick={onBack}>
           <ChevronLeft size={20} />
@@ -507,30 +593,32 @@ function DayScoreDetails({ scores, today, onBack }) {
 
       <div className="details-title">
         <div>
-          <div className="eyebrow">Day score details</div>
+          <div className="eyebrow">Day score</div>
 
           <h1>Daily scores</h1>
         </div>
       </div>
 
-      <div className="ds-top-grid">
-        <div className="ds-card">
-          <div className="ds-card-label">All-time average</div>
-
-          <div className="ds-big">
-            {allTime === null ? "—" : `${formatScore(allTime)}%`}
-          </div>
-
-          <div className="ds-card-sub">
-            {scoredKeys.length} day
-            {scoredKeys.length === 1 ? "" : "s"} scored
-          </div>
+      <section className="dt-panel">
+        <div className="dt-panel-head">
+          <span className="dt-panel-title">Averages</span>
         </div>
 
-        <div className="ds-card">
-          <div className="ds-card-label">Custom average</div>
+        <div className="dt-tiles">
+          <Tile
+            primary
+            label="All-time average"
+            value={
+              allTime === null
+                ? "—"
+                : `${formatScore(allTime)}%`
+            }
+            hint={`${scoredKeys.length} day${
+              scoredKeys.length === 1 ? "" : "s"
+            } scored`}
+          />
 
-          <div className="ds-range-row">
+          <div className="dt-calc">
             <label>
               From
               <input
@@ -556,50 +644,32 @@ function DayScoreDetails({ scores, today, onBack }) {
                 }
               />
             </label>
+
+            <div className="dt-calc-result">
+              <span className="dt-tile-label">
+                Custom average
+              </span>
+
+              <strong>
+                {range.average === null
+                  ? "—"
+                  : `${formatScore(range.average)}%`}
+              </strong>
+
+              <span className="dt-tile-hint">
+                {range.count} day
+                {range.count === 1 ? "" : "s"}
+              </span>
+            </div>
           </div>
-
-          <div className="ds-big">
-            {range.average === null
-              ? "—"
-              : `${formatScore(range.average)}%`}
-          </div>
-
-          <div className="ds-card-sub">
-            {range.count} day{range.count === 1 ? "" : "s"} in
-            range
-          </div>
-        </div>
-      </div>
-
-      <section className="ds-calendar-section">
-        <div className="section-heading">
-          <div>
-            <div className="eyebrow">Calendar</div>
-
-            <h2>Every day, month by month</h2>
-          </div>
-
-          <div className="ds-legend">
-            <span>0%</span>
-            <span className="ds-legend-bar" />
-            <span>100%</span>
-            <span className="ds-legend-none" />
-            <span>No data</span>
-          </div>
-        </div>
-
-        <div className="ds-months">
-          {months.map(({ year, month }) => (
-            <MonthCalendar
-              key={`${year}-${month}`}
-              year={year}
-              month={month}
-              scores={scores}
-              today={today}
-            />
-          ))}
         </div>
       </section>
+
+      <CalendarSection
+        months={months}
+        today={today}
+        getCell={getCell}
+      />
     </div>
   );
 }
@@ -894,80 +964,6 @@ function Heatmap({
           />
         );
       })}
-    </div>
-  );
-}
-
-/* =========================================================
-   MINI TREND GRAPH
-========================================================= */
-
-function TrendGraph({
-  habit,
-  days,
-}) {
-  const width = 700;
-  const height = 220;
-  const padding = 24;
-
-  const points = days.map((key, index) => {
-    const percent = Math.min(
-      100,
-      achievementPercent(
-        habit,
-        habit.records[key]
-      )
-    );
-
-    const x =
-      padding +
-      (index /
-        Math.max(1, days.length - 1)) *
-        (width - padding * 2);
-
-    const y =
-      height -
-      padding -
-      (percent / 100) *
-        (height - padding * 2);
-
-    return `${x},${y}`;
-  });
-
-  return (
-    <div className="trend-wrapper">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="trend-graph"
-        preserveAspectRatio="none"
-      >
-        <line
-          x1={padding}
-          y1={height - padding}
-          x2={width - padding}
-          y2={height - padding}
-          className="trend-axis"
-        />
-
-        <line
-          x1={padding}
-          y1={padding}
-          x2={width - padding}
-          y2={padding}
-          className="trend-reference"
-        />
-
-        <polyline
-          points={points.join(" ")}
-          className="trend-line"
-          fill="none"
-        />
-      </svg>
-
-      <div className="trend-labels">
-        <span>0%</span>
-        <span>100% reference</span>
-      </div>
     </div>
   );
 }
@@ -1315,9 +1311,9 @@ function HabitDetails({
   onBack,
   onEdit,
 }) {
-  const [period, setPeriod] = useState(
-    "90"
-  );
+  const [period, setPeriod] = useState("90");
+
+  const today = dateKey();
 
   const days90 = useMemo(
     () => getDateRange(DETAIL_DAYS),
@@ -1325,9 +1321,7 @@ function HabitDetails({
   );
 
   const allDates = useMemo(() => {
-    const keys = Object.keys(
-      habit.records
-    );
+    const keys = Object.keys(habit.records);
 
     if (keys.length === 0) {
       return [];
@@ -1353,9 +1347,7 @@ function HabitDetails({
   }, [habit.records]);
 
   const activeDates =
-    period === "90"
-      ? days90
-      : allDates;
+    period === "90" ? days90 : allDates;
 
   const stats = calculateStats(
     habit,
@@ -1363,24 +1355,50 @@ function HabitDetails({
     activeDates
   );
 
-  const months = useMemo(() => {
-    const groups = {};
+  const firstKey = firstRecordKey(habit);
 
-    for (const key of allDates) {
-      const month = formatMonthYear(key);
+  const months = useMemo(
+    () => (firstKey ? buildMonthList(firstKey, today) : []),
+    [firstKey, today]
+  );
 
-      if (!groups[month]) {
-        groups[month] = [];
-      }
+  const unit = habit.unit || "";
 
-      groups[month].push(key);
+  const getCell = (key) => {
+    const record = habit.records[key];
+
+    if (!record) {
+      return {
+        title: `${formatLongDate(key)} — No entry`,
+      };
     }
 
-    return Object.entries(groups).reverse();
-  }, [allDates]);
+    const intensity = clampedIntensity(habit, record);
+    const completed = isCompleted(habit, record);
+
+    if (habit.type === "boolean") {
+      return {
+        intensity,
+        main: completed ? "✓" : "",
+        title: `${formatLongDate(key)} — ${
+          completed ? "Completed" : "Not completed"
+        }`,
+      };
+    }
+
+    return {
+      intensity,
+      main: formatNumber(numericValue(record)),
+      title: `${formatLongDate(key)} — ${formatNumber(
+        numericValue(record)
+      )} ${unit} (${Math.round(
+        achievementPercent(habit, record)
+      )}%)`,
+    };
+  };
 
   return (
-    <div className="details-page">
+    <div className="details-page dt-page">
       <div className="details-header">
         <button
           className="back-button"
@@ -1401,290 +1419,131 @@ function HabitDetails({
 
       <div className="details-title">
         <div>
-          <div className="eyebrow">
-            Habit details
-          </div>
+          <div className="eyebrow">Habit details</div>
 
           <h1>{habit.name}</h1>
 
           {habit.type === "numeric" && (
             <p>
-              Goal:{" "}
-              {formatNumber(
-                habit.referenceAmount
-              )}{" "}
+              Goal: {formatNumber(habit.referenceAmount)}{" "}
               {habit.unit || "units"} per day
             </p>
           )}
         </div>
       </div>
 
-      <div className="details-stat-grid">
-        <StatBox
-          label="Current streak"
-          value={`${stats.currentStreak} day${
-            stats.currentStreak === 1
-              ? ""
-              : "s"
-          }`}
-          icon="🔥"
-        />
+      {firstKey ? (
+        <>
+          <section className="dt-panel">
+            <div className="dt-panel-head">
+              <span className="dt-panel-title">
+                Statistics
+              </span>
 
-        <StatBox
-          label="Longest streak"
-          value={`${stats.longestStreak} day${
-            stats.longestStreak === 1
-              ? ""
-              : "s"
-          }`}
-          icon="🏆"
-        />
+              <div className="segmented-control">
+                <button
+                  className={
+                    period === "90" ? "active" : ""
+                  }
+                  onClick={() => setPeriod("90")}
+                >
+                  90 days
+                </button>
 
-        <StatBox
-          label="Completion"
-          value={`${Math.round(
-            stats.completionRate
-          )}%`}
-          icon="✓"
-        />
-
-        <StatBox
-          label={
-            habit.type === "numeric"
-              ? "Average"
-              : "Completed"
-          }
-          value={
-            habit.type === "numeric"
-              ? `${formatNumber(
-                  stats.averageValue
-                )} ${
-                  habit.unit || ""
-                }`
-              : `${stats.completedDays} days`
-          }
-          icon="📊"
-        />
-      </div>
-
-      <section className="detail-section">
-        <div className="section-heading">
-          <div>
-            <div className="eyebrow">
-              Progress
-            </div>
-
-            <h2>
-              {period === "90"
-                ? "Last 90 days"
-                : "All history"}
-            </h2>
-          </div>
-
-          <div className="segmented-control">
-            <button
-              className={
-                period === "90"
-                  ? "active"
-                  : ""
-              }
-              onClick={() =>
-                setPeriod("90")
-              }
-            >
-              90 days
-            </button>
-
-            <button
-              className={
-                period === "all"
-                  ? "active"
-                  : ""
-              }
-              onClick={() =>
-                setPeriod("all")
-              }
-            >
-              All history
-            </button>
-          </div>
-        </div>
-
-        {activeDates.length > 0 ? (
-          <>
-            <div className="large-heatmap-card">
-              <Heatmap
-                habit={habit}
-                days={activeDates}
-              />
-
-              <div className="heatmap-legend">
-                <span>0%</span>
-
-                <span className="legend-scale">
-                  <i style={{ "--intensity": "10%" }} />
-                  <i style={{ "--intensity": "30%" }} />
-                  <i style={{ "--intensity": "50%" }} />
-                  <i style={{ "--intensity": "70%" }} />
-                  <i style={{ "--intensity": "100%" }} />
-                </span>
-
-                <span>100%+</span>
+                <button
+                  className={
+                    period === "all" ? "active" : ""
+                  }
+                  onClick={() => setPeriod("all")}
+                >
+                  All history
+                </button>
               </div>
             </div>
 
-            <div className="analytics-grid">
-              <StatBox
-                label="Days tracked"
-                value={stats.totalDays}
-                icon="📅"
+            <div className="dt-tiles">
+              <Tile
+                primary
+                label="Completion"
+                value={`${Math.round(
+                  stats.completionRate
+                )}%`}
+                hint={`${stats.completedDays} of ${stats.totalDays} days`}
               />
 
-              <StatBox
-                label="Days completed"
-                value={stats.completedDays}
-                icon="✓"
+              <Tile
+                label="Current streak"
+                value={`${stats.currentStreak} day${
+                  stats.currentStreak === 1 ? "" : "s"
+                }`}
               />
 
-              <StatBox
-                label="Missed days"
-                value={stats.missedDays}
-                icon="○"
+              <Tile
+                label="Longest streak"
+                value={`${stats.longestStreak} day${
+                  stats.longestStreak === 1 ? "" : "s"
+                }`}
               />
 
-              <StatBox
-                label="Average achievement"
+              <Tile
+                label="Avg achievement"
                 value={`${Math.round(
                   stats.averageAchievement
                 )}%`}
-                icon="📈"
               />
 
-              {habit.type ===
-                "numeric" && (
+              <Tile
+                label="Missed days"
+                value={stats.missedDays}
+              />
+
+              {habit.type === "numeric" && (
                 <>
-                  <StatBox
+                  <Tile
+                    label="Daily average"
+                    value={`${formatNumber(
+                      stats.averageValue
+                    )} ${unit}`}
+                  />
+
+                  <Tile
                     label="Total"
                     value={`${formatNumber(
                       stats.totalValue
-                    )} ${
-                      habit.unit || ""
-                    }`}
-                    icon="Σ"
+                    )} ${unit}`}
                   />
 
-                  <StatBox
+                  <Tile
                     label="Best day"
                     value={
                       stats.bestDay
-                        ? formatShortDate(
-                            stats.bestDay
-                          )
+                        ? formatShortDate(stats.bestDay)
                         : "—"
                     }
-                    icon="⭐"
                   />
                 </>
               )}
             </div>
-          </>
-        ) : (
-          <div className="empty-state">
-            <CalendarDays size={42} />
-            <h3>No history yet</h3>
-            <p>
-              Start tracking this habit and
-              your statistics will appear here.
-            </p>
-          </div>
-        )}
-      </section>
-
-      {activeDates.length > 1 && (
-        <section className="detail-section">
-          <div className="section-heading">
-            <div>
-              <div className="eyebrow">
-                Trend
-              </div>
-
-              <h2>
-                Achievement over time
-              </h2>
-            </div>
-          </div>
-
-          <div className="trend-card">
-            <TrendGraph
-              habit={habit}
-              days={activeDates}
-            />
-          </div>
-        </section>
-      )}
-
-      {period === "all" &&
-        months.length > 0 && (
-          <section className="detail-section">
-            <div className="section-heading">
-              <div>
-                <div className="eyebrow">
-                  History
-                </div>
-
-                <h2>Monthly history</h2>
-              </div>
-            </div>
-
-            <div className="monthly-history">
-              {months.map(
-                ([month, monthDates]) => {
-                  const monthStats =
-                    calculateStats(
-                      habit,
-                      habit.records,
-                      monthDates
-                    );
-
-                  return (
-                    <div
-                      className="month-row"
-                      key={month}
-                    >
-                      <div>
-                        <strong>
-                          {month}
-                        </strong>
-
-                        <span>
-                          {
-                            monthStats.completedDays
-                          }{" "}
-                          completed ·{" "}
-                          {Math.round(
-                            monthStats.completionRate
-                          )}
-                          %
-                        </span>
-                      </div>
-
-                      <div className="month-progress">
-                        <div
-                          style={{
-                            width: `${Math.min(
-                              100,
-                              monthStats.completionRate
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                }
-              )}
-            </div>
           </section>
-        )}
+
+          <CalendarSection
+            months={months}
+            today={today}
+            getCell={getCell}
+          />
+        </>
+      ) : (
+        <div className="empty-state">
+          <CalendarDays size={42} />
+
+          <h3>No history yet</h3>
+
+          <p>
+            Start tracking this habit and your calendar
+            and statistics will appear here.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1969,6 +1828,141 @@ function HabitModal({
 }
 
 /* =========================================================
+   WEIGHTS MODAL
+========================================================= */
+
+function WeightsModal({ habits, onClose, onSave }) {
+  const [values, setValues] = useState(() => {
+    const initial = {};
+
+    for (const habit of habits) {
+      initial[habit.id] = String(habitWeight(habit));
+    }
+
+    return initial;
+  });
+
+  const [saving, setSaving] = useState(false);
+
+  const parsed = habits.map((habit) => {
+    const number = Number(values[habit.id]);
+
+    return Number.isFinite(number) && number > 0
+      ? number
+      : null;
+  });
+
+  const valid = parsed.every((value) => value !== null);
+
+  const total = valid
+    ? parsed.reduce((sum, value) => sum + value, 0)
+    : 0;
+
+  const save = async (event) => {
+    event.preventDefault();
+
+    if (!valid) return;
+
+    const changes = {};
+
+    habits.forEach((habit, index) => {
+      if (parsed[index] !== habitWeight(habit)) {
+        changes[habit.id] = parsed[index];
+      }
+    });
+
+    setSaving(true);
+    await onSave(changes);
+    setSaving(false);
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="modal">
+        <div className="modal-header">
+          <div>
+            <div className="eyebrow">Day score</div>
+
+            <h2>Habit weights</h2>
+          </div>
+
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onClose}
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={save}>
+          <div className="ds-weight-list">
+            {habits.map((habit, index) => (
+              <div className="ds-weight-row" key={habit.id}>
+                <div className="ds-weight-name">
+                  <strong>{habit.name}</strong>
+
+                  <span>
+                    {parsed[index] !== null && total > 0
+                      ? `${formatScore(
+                          (parsed[index] / total) * 100
+                        )}% of the score`
+                      : "Enter a number above 0"}
+                  </span>
+                </div>
+
+                <input
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  value={values[habit.id]}
+                  onChange={(event) =>
+                    setValues((current) => ({
+                      ...current,
+                      [habit.id]: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+
+          <span className="input-help">
+            Changes apply from today onward. Scores of past
+            days never change.
+          </span>
+
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              className="primary-button"
+              disabled={saving || !valid}
+            >
+              {saving ? "Saving..." : "Save weights"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
    APP
 ========================================================= */
 
@@ -2018,6 +2012,9 @@ export default function App() {
     useState(false);
 
   const backfillBusy = useRef(false);
+
+  const [showWeights, setShowWeights] =
+    useState(false);
 
   /* -------------------------------------------------------
      AUTH
@@ -2735,6 +2732,51 @@ export default function App() {
   };
 
   /* -------------------------------------------------------
+     SAVE WEIGHTS (all habits at once)
+  ------------------------------------------------------- */
+
+  const saveWeights = async (changes) => {
+    const ids = Object.keys(changes);
+
+    setShowWeights(false);
+
+    if (!user || ids.length === 0) return;
+
+    setHabits((current) =>
+      current.map((habit) =>
+        changes[habit.id] !== undefined
+          ? { ...habit, weight: changes[habit.id] }
+          : habit
+      )
+    );
+
+    setSyncStatus(
+      navigator.onLine ? "syncing" : "offline"
+    );
+
+    try {
+      const batch = writeBatch(db);
+
+      for (const id of ids) {
+        batch.set(
+          HABIT_PATH(user.uid, id),
+          { weight: changes[id] },
+          { merge: true }
+        );
+      }
+
+      await batch.commit();
+
+      setSyncStatus(
+        navigator.onLine ? "synced" : "offline"
+      );
+    } catch (error) {
+      console.error(error);
+      setSyncStatus("offline");
+    }
+  };
+
+  /* -------------------------------------------------------
      DERIVED VALUES
   ------------------------------------------------------- */
 
@@ -3095,13 +3137,25 @@ export default function App() {
               />
             </div>
 
-            <button
-              className="ds-view-details"
-              onClick={() => setShowDayDetails(true)}
-            >
-              View details
-              <ChevronRight size={16} />
-            </button>
+            <div className="ds-bar-actions">
+              <button
+                className="ds-view-details"
+                onClick={() => setShowDayDetails(true)}
+              >
+                View details
+                <ChevronRight size={16} />
+              </button>
+
+              {habits.length > 0 && (
+                <button
+                  className="ds-view-details"
+                  onClick={() => setShowWeights(true)}
+                >
+                  <Settings size={14} />
+                  Adjust weights
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
@@ -3295,6 +3349,14 @@ export default function App() {
             setEditingHabit(null);
           }}
           onSave={saveHabit}
+        />
+      )}
+
+      {showWeights && (
+        <WeightsModal
+          habits={habits}
+          onClose={() => setShowWeights(false)}
+          onSave={saveWeights}
         />
       )}
 
